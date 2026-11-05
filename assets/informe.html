@@ -1,0 +1,1257 @@
+<!doctype html>
+<html lang="es" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Título del informe</title>
+<!-- Para usarlo sin internet: python3 scripts/empaquetar.py entrada.html salida.html --remoto -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* =====================================================================
+   TOKENS. La base es blanco sobre negro (o negro sobre blanco). El color
+   de acento solo marca: número de sección, subrayado, la línea o barra
+   clave, una etiqueta. Nunca rellena superficies grandes.
+   Cambia --hue según el tema (references/diseno.md); nada más.
+   ===================================================================== */
+:root{
+  --hue: 75;                 /* 0–360: tono del acento */
+  --display: "Bebas Neue", Impact, "Arial Narrow", sans-serif;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --r: 4px;                  /* radio de esquinas: mínimo, casi recto */
+  --ease: cubic-bezier(.22,1,.36,1);
+}
+/* Tema oscuro (por defecto si el sistema está en oscuro). --B fondo, --F texto, --M relleno suave */
+:root,[data-theme=dark]{--B:#111111;--F:#f1f1f1;--M:#1a1a1a;--accent:oklch(.82 .15 var(--hue))}
+[data-theme=light]{--B:#fafafa;--F:#141414;--M:#efefef;--accent:oklch(.5 .16 var(--hue))}
+@media (prefers-color-scheme: light){
+  :root[data-theme=auto]{--B:#fafafa;--F:#141414;--M:#efefef;--accent:oklch(.5 .16 var(--hue))}
+}
+:root,[data-theme]{--bg:var(--B);--fg:var(--F);--muted:var(--M)}
+/* Invertido: lo más importante va en blanco sobre negro (o al revés), no en color */
+.inv{--bg:var(--F);--fg:var(--B);--muted:color-mix(in oklab,var(--F) 90%,var(--B));background:var(--bg)!important;color:var(--fg);border-color:var(--bg)!important}
+:root,[data-theme],.inv{
+  --soft:color-mix(in oklab,var(--fg) 72%,transparent);
+  --faint:color-mix(in oklab,var(--fg) 60%,transparent);
+  --line:color-mix(in oklab,var(--fg) 15%,transparent);
+  --off:color-mix(in oklab,var(--fg) 24%,transparent);
+  --tint:color-mix(in oklab,var(--accent) 14%,transparent);
+}
+.inv .tag{border-color:var(--fg);color:var(--fg)}
+
+/* =====================================================================
+   BASE
+   ===================================================================== */
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.7 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{margin:0;font-weight:400}
+p{margin:0 0 1em}
+img,svg{max-width:100%}
+a{color:inherit}
+.hl{color:var(--accent)}
+.u{text-decoration:none;background-image:linear-gradient(var(--accent),var(--accent));background-size:100% 1.5px;background-position:0 100%;background-repeat:no-repeat;padding-bottom:1px}
+.pill{display:inline-block;font:500 12px/1.7 var(--sans);padding:2px 10px;border:1px solid var(--line);color:var(--soft);border-radius:999px;white-space:nowrap}
+.tag{display:inline-block;font:500 11px/1.8 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:0 8px;border:1px solid var(--accent);color:var(--accent);border-radius:var(--r);white-space:nowrap;vertical-align:2px}
+.mono{font-family:var(--mono)}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+
+/* =====================================================================
+   ESTRUCTURA: columna lateral fija (título + índice) y contenido.
+   La columna lateral NUNCA tiene scroll: fitRail() esconde lo secundario
+   si no cabe. En celular, la columna se vuelve encabezado y el índice
+   es un botón abajo a la derecha.
+   ===================================================================== */
+.page{width:min(1440px,100% - 40px);margin:0 auto;padding:36px 0 90px}
+.rail .hey{font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:10px}
+.rail h1{font:400 clamp(48px,11vw,64px)/0.92 var(--display);letter-spacing:.4px}
+.rail .sub{font-size:15px;line-height:1.55;color:var(--soft);margin:14px 0}
+.rail .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.theme-btn{all:unset;cursor:pointer;font:500 12px/1.7 var(--sans);padding:2px 10px;border:1px solid var(--line);border-radius:999px;color:var(--soft)}
+.theme-btn:hover{color:var(--fg);border-color:var(--off)}
+.rail nav{display:none}
+.toc{list-style:none;margin:0;padding:0;display:grid;gap:1px;counter-reset:t}
+.toc li{counter-increment:t}
+.toc a{display:flex;align-items:baseline;gap:12px;padding:5px 0;color:var(--soft);text-decoration:none;font-size:13.5px;line-height:1.35}
+.toc a::before{content:counter(t,decimal-leading-zero);flex:none;font:500 11px var(--mono);color:var(--faint)}
+.toc a span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-width:0}
+.toc a:hover,.toc a.on{color:var(--fg)}
+.toc a.on::before{color:var(--accent)}
+.mob{position:fixed;right:16px;bottom:16px;z-index:40}
+.mob>button{display:grid;place-items:center;width:46px;height:46px;margin-left:auto;border:0;border-radius:var(--r);background:var(--fg);color:var(--bg);font:500 18px var(--mono);cursor:pointer}
+.mob nav{display:none;margin-bottom:8px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;max-width:calc(100vw - 32px);max-height:70vh;overflow:auto;box-shadow:0 20px 50px -20px #000a}
+.mob.open nav{display:block}
+.mob .toc a span{-webkit-line-clamp:unset}
+main{min-width:0}
+
+@media (min-width:1000px){
+  .page{display:grid;grid-template-columns:280px minmax(0,1fr);gap:72px;padding-top:64px;width:min(1440px,100% - 64px)}
+  .rail{display:flex;flex-direction:column;position:sticky;top:40px;align-self:start;height:calc(100vh - 130px);max-height:860px;overflow:hidden} /* deja libre el botón fijo Comentar, abajo a la izquierda */
+  .rail h1{font-size:clamp(38px,6vh,56px)}
+  .rail .sub{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+  .rail nav{display:block;margin-top:auto;padding-top:18px;border-top:1px solid var(--line)}
+  .rail.t1 .sub{display:none}
+  .rail.t2 .meta{display:none}
+  .rail.t2 h1{font-size:clamp(34px,5vh,44px)}
+  .rail.t3 .toc a{padding:2px 0;font-size:12.5px}
+  .rail.t3 .toc a span{-webkit-line-clamp:1}
+  .mob{display:none}
+}
+
+/* =====================================================================
+   RESUMEN Y CIFRAS (siempre arriba)
+   ===================================================================== */
+.sum{border:1px solid var(--line);border-radius:var(--r);padding:22px;margin:28px 0 0}
+.sum .idea{font:600 20px/1.4 var(--sans);margin:0 0 12px}
+.sum ul{margin:0 0 14px;padding-left:18px;line-height:1.6;color:var(--soft)}
+.sum ul b{color:var(--fg)}
+.sum ul li::marker{color:var(--accent)}
+.sum .need{font-size:14.5px;margin:0;padding-top:12px;border-top:1px solid var(--line)}
+.sum .need b{font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-right:10px}
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0 0}
+.kpi{border:1px solid var(--line);border-radius:var(--r);padding:18px;display:flex;flex-direction:column;min-width:0}
+.kpi .k{font:500 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:14px}
+.kpi .v{font:400 clamp(42px,5vw,76px)/0.86 var(--display);font-variant-numeric:tabular-nums}
+.kpi .l{color:var(--soft);font-size:14px;line-height:1.4;margin-top:8px}
+.kpi .dl{font:500 14px var(--mono);color:var(--faint);margin-top:auto;padding-top:12px}
+.kpi .dl em{font-style:normal;color:var(--accent)}
+@media (min-width:1000px){
+  .sum{display:grid;grid-template-columns:7fr 5fr;gap:6px 40px;padding:28px 30px;margin:0}
+  .sum .idea{grid-row:1/3;font-size:22px;margin:0}
+  .sum ul{margin:0}
+  .sum .need{grid-column:1/-1;margin-top:16px}
+  .kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  .kpi{padding:22px;min-height:196px}
+}
+
+/* =====================================================================
+   SECCIONES. Elige la forma según el contenido:
+   · .lado  → texto y evidencia de alto parecido, lado a lado.
+   · .ancho → título y texto arriba en dos columnas; la evidencia, a lo
+              ancho debajo (gráficos apaisados, filas de tarjetas, grillas).
+   Nunca dejes una columna medio vacía junto a algo largo.
+   ===================================================================== */
+.sec{position:relative;padding-top:64px;scroll-margin-top:24px}
+.sh .n{display:block;font:500 12px var(--mono);letter-spacing:.12em;color:var(--accent);margin-bottom:8px}
+.sh h2{font:400 clamp(34px,4.2vw,50px)/0.95 var(--display);letter-spacing:.4px;margin-bottom:16px}
+.st,.sf{min-width:0}
+.sf{margin-top:14px}
+@media (min-width:1000px){
+  .sec{padding-top:92px}
+  .sec.lado{display:grid;grid-template-columns:5fr 6fr;grid-auto-rows:min-content;column-gap:52px}
+  .sec.lado .sh{grid-column:1/-1}
+  .sec.lado .st{grid-column:1}
+  .sec.lado .sf{grid-column:2;grid-row:2/span 3;margin:0}
+  .sec.ancho{display:grid;grid-template-columns:5fr 6fr;grid-auto-rows:min-content;column-gap:52px}
+  .sec.ancho .sh{grid-column:1;grid-row:1}
+  .sec.ancho .st{grid-column:2;grid-row:1;align-self:end;padding-bottom:16px}
+  .sec.ancho .st p:last-child{margin-bottom:0}
+  .sec.ancho .sf{grid-column:1/-1;margin-top:22px}
+}
+
+/* =====================================================================
+   COMPONENTES GRÁFICOS. Usa muchos: cada sección lleva al menos uno.
+   ===================================================================== */
+/* Figura sin contenedor: rótulo sobre una línea, el gráfico suelto, la lectura abajo */
+.fg{margin:0}
+.fg .fl{display:flex;justify-content:space-between;gap:12px;font:500 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);border-top:1px solid var(--fg);padding-top:10px;margin-bottom:18px}
+.fg .fl b{color:var(--fg);font-weight:500;white-space:nowrap}
+.cap{font-size:13.5px;color:var(--soft);margin:12px 0 0;line-height:1.5}
+.cap b{color:var(--fg);font-weight:600}
+.cap .src{display:block;font-size:12px;color:var(--faint);margin-top:4px}
+/* Gráficos SVG: colores desde los tokens */
+.chart{width:100%;height:auto;display:block;overflow:visible}
+.chart text{font:12px var(--sans);fill:var(--soft)}
+.chart .grid{stroke:var(--line)}
+.chart .ln-key{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.chart .ln-off{fill:none;stroke:var(--off);stroke-width:2.5}
+.chart .dot{fill:var(--accent)}
+.chart .lab-key{fill:var(--fg);font-weight:600}
+.chart .note{fill:var(--accent);font:500 12px var(--mono);letter-spacing:.04em}
+/* Barras horizontales: <div class="bars"><div class="key" style="--v:.82"><span>Etiqueta</span><b>82 %</b></div>… */
+.bars{display:grid;gap:12px}
+.bars>div{display:grid;grid-template-columns:minmax(80px,28%) 1fr auto;align-items:center;gap:12px;font-size:14px}
+.bars>div::after{content:"";grid-column:2;grid-row:1;height:22px;width:calc(var(--v) * 100%);background:var(--off)}
+.bars>div.key::after{background:var(--accent)}
+.bars span{grid-column:1;color:var(--soft)}
+.bars .key span,.bars .key b{color:var(--fg);font-weight:600}
+.bars b{grid-column:3;font-variant-numeric:tabular-nums;font-weight:500;min-width:4ch;text-align:right}
+/* Pictograma "N de cada 10": <div class="waffle" style="--n:8" aria-label="8 de cada 10"></div> */
+.waffle{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;max-width:420px;margin:18px 0 6px}
+.waffle i{aspect-ratio:1;border-radius:2px;background:var(--off)}
+.waffle i.on{background:var(--accent)}
+.waffle-l{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+/* Antes y después */
+.ba{display:grid;grid-template-columns:1fr auto 1fr;align-items:stretch;gap:10px}
+.ba>div{border:1px solid var(--line);border-radius:var(--r);padding:18px 20px}
+.ba .k{display:block;font:500 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:10px}
+.ba .v{display:block;font:400 clamp(40px,4.4vw,64px)/0.9 var(--display)}
+.ba .l{display:block;font-size:13.5px;color:var(--soft);margin-top:8px}
+.ba .arrow{display:grid;place-items:center;border:0;padding:0;color:var(--accent);font:400 30px var(--display)}
+/* Lista con íconos */
+.ilist{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.ilist li{display:grid;grid-template-columns:36px 1fr;gap:14px;align-items:start}
+.ic{width:36px;height:36px;padding:8px;border:1px solid var(--line);border-radius:var(--r);stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ilist .ic.a{color:var(--accent);border-color:var(--accent)}
+.ilist b{display:block;font-weight:600}
+.ilist span{color:var(--soft);font-size:14.5px}
+/* Imagen real (foto, captura, mapa): siempre con pie y crédito */
+.img{margin:0}
+.img img{display:block;width:100%;height:auto;border-radius:var(--r)}
+.img .ph{aspect-ratio:16/7;border-radius:var(--r);display:grid;place-items:center;text-align:center;padding:20px;color:var(--faint);font:500 12px var(--mono);letter-spacing:.06em;
+  background:repeating-linear-gradient(135deg,transparent 0 12px,var(--line) 12px 13px);border:1px dashed var(--off)}
+.img-row{display:grid;gap:10px}
+@media (min-width:700px){.img-row{grid-template-columns:2fr 1fr}}
+/* Caja "En simple" (explicar con una analogía) */
+.box{padding:18px 20px;border-radius:var(--r);border:1px solid var(--line);margin:22px 0 0}
+.box .t{display:block;font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.box p:last-child{margin:0}
+/* Fórmula con lo que significa cada símbolo */
+.fx{margin:22px 0 0;padding:16px 0 0;border-top:1px solid var(--line)}
+.formula{display:inline-flex;align-items:center;gap:.4em;font:500 1.4em var(--mono)}
+.frac{display:inline-grid;text-align:center;vertical-align:middle}
+.frac>span:first-child{border-bottom:1.5px solid currentColor;padding:0 .3em .1em}
+.frac>span:last-child{padding-top:.1em}
+.legend-f{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14.5px;color:var(--soft);margin-top:14px}
+.legend-f code{font:600 1em var(--mono);color:var(--fg)}
+/* Simulador: elegir con botones y leer el resultado en grande (ver SIMULADORES abajo) */
+.sim{display:grid;gap:22px}
+.sim .ctl{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.sim .ctl span{font:500 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.pick{display:inline-flex;border:1px solid var(--fg);border-radius:var(--r);overflow:hidden}
+.pick button{all:unset;cursor:pointer;min-width:48px;text-align:center;padding:9px 0;font:500 15px var(--mono);color:var(--fg)}
+.pick button+button{border-left:1px solid var(--fg)}
+.pick button[aria-pressed=true]{background:var(--fg);color:var(--bg)}
+.pick button:focus-visible{outline:2px solid var(--accent);outline-offset:-4px}
+.read{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.read>div{border-top:1px solid var(--line);padding-top:10px;min-width:0}
+.read b{display:block;font:400 clamp(40px,4.4vw,60px)/0.9 var(--display);font-variant-numeric:tabular-nums}
+.read span{display:block;font-size:13px;color:var(--soft);margin-top:6px;line-height:1.35}
+.read .key{border-top:2px solid var(--accent)}
+.read .key b{color:var(--accent)}
+@media (max-width:640px){.read{grid-template-columns:1fr 1fr}.read .key{grid-column:1/-1}}
+.gauge{position:relative;height:4px;background:var(--line)}
+.gauge i{position:absolute;inset:0 auto 0 0;background:var(--fg);transition:width .5s var(--ease)}
+.gauge s{position:absolute;top:-6px;bottom:-6px;width:2px;background:var(--accent)}
+.gauge-l{display:flex;justify-content:space-between;font:500 11px var(--mono);color:var(--faint);margin-top:8px}
+/* Tarjetas: opciones, pasos, preguntas y fuentes */
+.cards{display:grid;gap:8px}
+@media (min-width:1000px){.cards.c3{grid-template-columns:repeat(3,minmax(0,1fr))}.cards.c2{grid-template-columns:1fr 1fr}}
+.card{border:1px solid var(--line);border-radius:var(--r);padding:20px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.card .ol{font:400 44px/0.9 var(--display);color:var(--faint)}
+.card b{font-weight:600}
+.card p,.card span{margin:0;color:var(--soft);font-size:14.5px;line-height:1.55}
+.card .oc{margin-top:auto;padding-top:14px;font:400 34px/1 var(--display);color:var(--fg)}
+.card .oc small{font:500 11px var(--mono);letter-spacing:.08em;color:var(--faint);text-transform:uppercase;margin-left:6px}
+.card .d{font:500 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.card .top{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+/* Origen de cada cifra: dato medido, estimado o supuesto */
+.chip{display:inline-block;font:500 11px/1.8 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:0 7px;border:1px solid var(--off);color:var(--soft);border-radius:var(--r);white-space:nowrap}
+.chip.est{border-color:var(--accent);color:var(--accent)}
+.chip.sup{border-style:dashed;color:var(--faint)}
+/* Tablas: en celular cada fila se vuelve ficha (sin scroll horizontal) */
+table.t{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:14.5px}
+table.t th,table.t td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+table.t th{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+table.t .n{text-align:right;white-space:nowrap}
+table.t tr.rec td{background:var(--tint)}
+@media (max-width:700px){
+  table.t thead{display:none}
+  table.t,table.t tbody,table.t tr,table.t td{display:block;width:100%}
+  table.t tr{border-bottom:1px solid var(--line);padding:10px 0}
+  table.t td{border:0;padding:3px 12px;display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;text-align:left!important;white-space:normal!important}
+  table.t td::before{content:attr(data-l);font:500 11px/1.9 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+}
+/* Anexo plegable */
+details.ax{border-top:1px solid var(--line);padding:14px 0}
+details.ax summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:16px}
+details.ax summary::after{content:"+";font:400 18px var(--mono);color:var(--faint)}
+details.ax[open] summary::after{content:"−"}
+details.ax>div{padding-top:10px;color:var(--soft)}
+dl.gl{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px;margin:0}
+dl.gl dt{font-weight:600;color:var(--fg)}dl.gl dd{margin:0}
+@media (max-width:560px){dl.gl{grid-template-columns:1fr;gap:2px}dl.gl dd{margin-bottom:10px}}
+
+/* =====================================================================
+   PRIORIDAD, PASOS CON CHECK Y DECISIONES (mismos nombres que en el deck)
+   · <span class="prio alta|media|baja">Alta</span>
+   · <ol class="pasos-check" data-id="…"><li><label><input type="checkbox"><span class="pc-t"><b>Paso</b><small>detalle</small></span></label><span class="prio alta">Alta</span></li>…</ol>
+     (el check se recuerda en este navegador; el contador "N de M listos" sale solo)
+   · <div class="decision"><article class="dec-item" data-id="d1"><header><h3>Título</h3><span class="prio alta">Alta</span></header>
+     <p class="dec-prob"><b>El problema</b>…</p><p class="dec-prop"><b>Propuesta</b>…</p></article>…</div>
+     (los botones De acuerdo / No / No entendí, el comentario y la barra para exportar los arma el script)
+   ===================================================================== */
+.prio{display:inline-flex;align-items:center;gap:6px;font:500 11px/1.8 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:0 8px;border:1px solid var(--off);color:var(--soft);border-radius:var(--r);white-space:nowrap}
+.prio::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:currentColor}
+.prio.alta{border-color:var(--accent);color:var(--accent)}
+.prio.media::before{background:none;box-shadow:inset 0 0 0 1.5px currentColor}
+.prio.baja{border-style:dashed;color:var(--faint)}
+.prio.baja::before{opacity:.45}
+.pasos-check{list-style:none;margin:0;padding:0;display:grid;gap:8px;counter-reset:pc}
+.pasos-check li{counter-increment:pc;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;transition:border-color .2s,opacity .2s}
+.pasos-check label{display:flex;gap:14px;align-items:flex-start;cursor:pointer;min-width:0;flex:1}
+.pasos-check input{appearance:none;-webkit-appearance:none;flex:none;width:22px;height:22px;margin:1px 0 0;border:1.5px solid var(--fg);border-radius:var(--r);display:grid;place-items:center;cursor:pointer;background:transparent}
+.pasos-check input::after{content:"";width:11px;height:6px;border:solid var(--bg);border-width:0 0 2px 2px;transform:rotate(-45deg) translate(1px,-1px) scale(0);transition:transform .15s var(--ease)}
+.pasos-check input:checked{background:var(--fg)}
+.pasos-check input:checked::after{transform:rotate(-45deg) translate(1px,-1px) scale(1)}
+.pasos-check input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.pasos-check .pc-t{display:grid;gap:2px;min-width:0}
+.pasos-check .pc-t b{font-weight:600}
+.pasos-check .pc-t small{font-size:14px;color:var(--soft)}
+.pasos-check li:has(input:checked){border-color:var(--off)}
+.pasos-check li:has(input:checked) .pc-t{opacity:.55}
+.pasos-check li:has(input:checked) .pc-t b{text-decoration:line-through;text-decoration-thickness:1px}
+.pasos-check::after{content:attr(data-hechos) " de " attr(data-total) " listos";font:500 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);padding-top:4px}
+.decision{display:grid;gap:8px}
+.dec-item{counter-increment:dec;border:1px solid var(--line);border-radius:var(--r);padding:20px;display:grid;gap:12px;min-width:0;transition:border-color .2s}
+.decision{counter-reset:dec}
+.dec-item>header{display:flex;gap:12px;align-items:baseline;justify-content:space-between}
+.dec-item h3{font:600 17px/1.35 var(--sans);display:flex;gap:14px;align-items:baseline;min-width:0}
+.dec-item h3::before{content:counter(dec);flex:none;font:400 34px/0.9 var(--display);color:var(--faint)}
+.dec-item p{margin:0;font-size:14.5px;line-height:1.55;color:var(--soft)}
+.dec-item p b{display:block;font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+.dec-item .dec-prop{color:var(--fg)}
+.dec-item .dec-prop b{color:var(--accent)}
+.dec-btns{display:flex;flex-wrap:wrap;gap:6px}
+.dec-btns button{all:unset;cursor:pointer;box-sizing:border-box;padding:10px 16px;border:1px solid var(--fg);border-radius:var(--r);font:500 14px/1 var(--sans);color:var(--fg)}
+.dec-btns button:hover{background:var(--muted)}
+.dec-btns button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dec-btns button[aria-pressed=true]{background:var(--fg);color:var(--bg)}
+.dec-btns button[data-r=nose]{border-style:dashed}
+.dec-btns button[data-r=nose][aria-pressed=true]{background:var(--tint);color:var(--accent);border:1px solid var(--accent)}
+.dec-nota{all:unset;box-sizing:border-box;width:100%;border-bottom:1px solid var(--line);padding:6px 0;font-size:14px;color:var(--fg)}
+.dec-nota::placeholder{color:var(--faint)}
+.dec-nota:focus{border-color:var(--accent)}
+.dec-item[data-r=si],.dec-item[data-r=no]{border-color:var(--off)}
+.dec-item[data-r=nose]{border-color:var(--accent)}
+.dec-barra{display:flex;flex-wrap:wrap;align-items:center;gap:8px;position:sticky;bottom:12px;background:var(--bg);border:1px solid var(--fg);border-radius:var(--r);padding:10px 12px}
+.dec-barra .dec-cuenta{flex:1 1 140px;font:500 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--soft)}
+.dec-barra button{all:unset;cursor:pointer;box-sizing:border-box;padding:9px 12px;border:1px solid var(--off);border-radius:var(--r);font:500 13px/1 var(--sans);color:var(--fg)}
+.dec-barra button:hover{border-color:var(--fg)}
+.dec-barra button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dec-barra button.p{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+@media (max-width:600px){.dec-barra{bottom:68px}}
+.dec-aviso{flex-basis:100%;font-size:13px;color:var(--accent);min-height:0}
+.dec-aviso:empty{display:none}
+
+/* =====================================================================
+   IMPRESIÓN (A4, claro, sin columna fija ni botones)
+   ===================================================================== */
+@media print{
+  @page{size:A4;margin:14mm 14mm 16mm}
+  :root,[data-theme]{--B:#fff;--F:#111;--M:#f2f2f2;--accent:oklch(.5 .16 var(--hue))}
+  body{font-size:10.5pt}
+  .page{display:block;width:auto;padding:0}
+  .rail{position:static;height:auto;max-height:none;display:block;margin-bottom:18px}
+  .rail nav,.mob,.theme-btn{display:none!important}
+  .sec{break-inside:avoid-page;padding-top:28px}
+  .kpis,.cards,.fg,.ba{break-inside:avoid}
+  details.ax>div{display:block!important}
+  .dec-barra{display:none}
+  .dec-btns button:not([aria-pressed=true]){display:none}
+  .dec-nota:placeholder-shown{display:none}
+  .dec-item,.pasos-check li{break-inside:avoid}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+<!-- Íconos (trazo, sin relleno). Úsalos con <svg class="ic"><use href="#i-reloj"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-reloj" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-alerta" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-sube" viewBox="0 0 24 24"><path d="M3 17 9 11l4 4 8-8"/><path d="M15 7h6v6"/></symbol>
+  <symbol id="i-personas" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6 6 0 0 1 3.5 5.5"/></symbol>
+  <symbol id="i-dinero" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="1.5"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9.5v5M18 9.5v5"/></symbol>
+  <symbol id="i-ruta" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/></symbol>
+  <symbol id="i-dato" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+</svg>
+
+<!-- =====================================================================
+  CÓMO SE USA (borra los ejemplos y escribe tu informe):
+  - El encabezado va UNA vez, dentro de <aside class="rail">; en celular se vuelve el encabezado de arriba.
+  - El índice se arma solo con los <h2> de cada <section id>; los números (.n vacíos) también.
+  - Cada <section class="sec lado|ancho">: elige "lado" solo si texto y evidencia tienen alto parecido.
+  - Cada sección lleva al menos un componente gráfico (figura, barras, pictograma, antes/después,
+    íconos, imagen, tarjetas). Mira references/visuales.md.
+  - El color de acento solo marca: no pintes superficies grandes con él.
+  - Si el informe pide respuestas punto por punto, usa .decision (CSS y script ya vienen); para una lista de
+    verificación, .pasos-check; para la prioridad, <span class="prio alta|media|baja">.
+  - La tecla C prende el modo comentar (módulo de más abajo): el lector deja notas ancladas y las copia en Markdown.
+====================================================================== -->
+<div class="page">
+  <aside class="rail" id="rail">
+    <div>
+      <div class="hey">Informe · Tercer trimestre 2026</div>
+      <h1>El delivery explica <span class="hl">8 de cada 10</span> pesos nuevos</h1>
+      <p class="sub">Qué pasó con las ventas entre julio y septiembre, dónde se pierden pedidos y qué conviene hacer antes de diciembre.</p>
+      <div class="meta"><span class="pill">19 oct 2026</span><span class="pill" id="rt">6 min</span><button class="theme-btn" id="themeBtn" type="button" aria-label="Cambiar entre tema claro y oscuro">◐ Tema</button></div>
+    </div>
+    <nav aria-label="Índice"><ul class="toc" id="toc"></ul></nav>
+  </aside>
+  <div class="mob" id="mob"><nav aria-label="Índice"><ul class="toc" id="tocMob"></ul></nav><button type="button" aria-label="Abrir índice">≡</button></div>
+
+  <main>
+    <!-- Resumen: idea principal, 3 apoyos y qué se necesita del lector -->
+    <div class="sum">
+      <p class="idea">Recomiendo sumar un segundo repartidor en hora punta: cuesta $0,9 M al mes y recupera unos $1,6 M en pedidos que hoy se pierden.</p>
+      <ul><li><b>Qué pasa:</b> el delivery creció 3 veces y ya es 4 de cada 10 pesos.</li><li><b>Dónde duele:</b> en hora punta se cancela 1 de cada 6 pedidos por espera.</li><li><b>Riesgo:</b> si la demanda baja en verano, el segundo turno sobra; se revisa el 8 de diciembre.</li></ul>
+      <p class="need"><b>Qué necesito</b>Tu aprobación antes del 31 de octubre.</p>
+    </div>
+    <!-- Cifras: la principal va invertida (.inv), no en color -->
+    <div class="kpis">
+      <div class="kpi inv"><span class="k">Ventas</span><div class="v">+18 %</div><div class="l">frente al trimestre anterior</div><div class="dl">$48,2 M en el trimestre</div></div>
+      <div class="kpi"><span class="k">Delivery</span><div class="v">41 %</div><div class="l">de las ventas</div><div class="dl"><em>▲</em> antes 27 %</div></div>
+      <div class="kpi"><span class="k">Entrega</span><div class="v">52 min</div><div class="l">en hora punta</div><div class="dl">meta: 35 min</div></div>
+      <div class="kpi"><span class="k">Pérdida</span><div class="v">1 de 6</div><div class="l">pedidos en hora punta</div><div class="dl">~$1,9 M al mes</div></div>
+    </div>
+
+    <!-- ANCHO: gráfico apaisado a todo el ancho -->
+    <section class="sec ancho" id="s-tendencia">
+      <div class="sh"><span class="n"></span><h2>El delivery ya es 4 de cada 10 pesos que vendemos</h2></div>
+      <div class="st"><p>En enero el delivery vendía $2,1 millones al mes; en septiembre, <span class="u">$6,4 millones</span>. El local se mantuvo estable, cerca de $9,5 millones.</p></div>
+      <div class="sf">
+        <figure class="fg"><figcaption class="fl"><b>Fig. 01</b><span>Ventas mensuales · millones de pesos</span></figcaption>
+<svg class="chart" viewBox="0 0 1000 300" role="img" aria-label="Ventas mensuales en millones: el delivery sube de 2,1 a 6,4 y el local se mantiene cerca de 9,5">
+  <line x1="34" x2="896" y1="270" y2="270" class="grid"/><text x="26" y="274" text-anchor="end">0</text>
+  <line x1="34" x2="896" y1="143" y2="143" class="grid"/><text x="26" y="147" text-anchor="end">5</text>
+  <line x1="34" x2="896" y1="16" y2="16" class="grid"/><text x="26" y="20" text-anchor="end">10</text>
+  <text x="34" y="292" text-anchor="middle">Ene</text><text x="141.8" y="292" text-anchor="middle">Feb</text><text x="249.5" y="292" text-anchor="middle">Mar</text><text x="357.3" y="292" text-anchor="middle">Abr</text><text x="465" y="292" text-anchor="middle">May</text><text x="572.8" y="292" text-anchor="middle">Jun</text><text x="680.5" y="292" text-anchor="middle">Jul</text><text x="788.3" y="292" text-anchor="middle">Ago</text><text x="896" y="292" text-anchor="middle">Sep</text>
+  <path d="M34 38.9 L141.8 41.4 L249.5 33.8 L357.3 36.3 L465 31.2 L572.8 33.8 L680.5 28.7 L788.3 26.2 L896 28.7" class="ln-off"/>
+  <path d="M34 216.7 L141.8 209 L249.5 198.9 L357.3 186.2 L465 170.9 L572.8 153.2 L680.5 137.9 L788.3 120.1 L896 107.4" class="ln-key"/>
+  <circle cx="34" cy="216.7" r="4" class="dot"/><circle cx="896" cy="107.4" r="5" class="dot"/>
+  <text x="465" y="127" class="note" text-anchor="middle">× 3 en nueve meses</text>
+  <text x="908" y="112.4" class="lab-key">Delivery 6,4</text>
+  <text x="908" y="33.7">Local 9,5</text>
+</svg>
+          <p class="cap"><b>El delivery se triplicó en nueve meses; el local no se movió.</b><span class="src">Fuente: sistema de caja, exportación del 30 sep 2026.</span></p>
+        </figure>
+      </div>
+    </section>
+
+    <!-- LADO: texto + pictograma a la izquierda, barras a la derecha (alto parecido) -->
+    <section class="sec lado" id="s-crecimiento">
+      <div class="sh"><span class="n"></span><h2>Casi todo el crecimiento vino del delivery</h2></div>
+      <div class="st">
+        <p>De cada $100 nuevos que vendimos este trimestre, <span class="u">$82 vinieron del delivery</span>.</p>
+        <div class="waffle" style="--n:8" role="img" aria-label="8 de cada 10 pesos nuevos"></div>
+        <div class="waffle-l">8 de cada 10 pesos nuevos</div>
+        <div class="box"><span class="t">En simple</span><p>Es como una tienda donde casi todos los clientes nuevos entran por una sola puerta: si esa puerta se tranca, se pierde casi todo lo nuevo.</p></div>
+      </div>
+      <div class="sf">
+        <figure class="fg"><figcaption class="fl"><b>Fig. 02</b><span>Aporte al crecimiento · T3 frente a T2</span></figcaption>
+          <div class="bars">
+            <div class="key" style="--v:.82"><span>Delivery</span><b>82 %</b></div>
+            <div style="--v:.12"><span>Local</span><b>12 %</b></div>
+            <div style="--v:.06"><span>Mayorista</span><b>6 %</b></div>
+          </div>
+          <p class="cap"><b>El local y el mayorista apenas se movieron.</b></p>
+        </figure>
+      </div>
+    </section>
+
+    <!-- LADO: fórmula explicada + simulador -->
+    <section class="sec lado" id="s-cuello">
+      <div class="sh"><span class="n"></span><h2>Con un repartidor, en hora punta se pierde 1 de cada 6 pedidos</h2></div>
+      <div class="st">
+        <p>Un repartidor tarda 26 minutos por viaje: entrega unos 2,3 pedidos por hora. En la hora punta piden 2,8. La diferencia se cancela por espera.</p>
+        <div class="fx"><span class="formula">c = <span class="frac"><span>r × 60</span><span>t</span></span></span>
+          <div class="legend-f"><code>c</code><span>pedidos por hora que alcanzamos a entregar</span><code>r</code><span>repartidores</span><code>t</code><span>minutos por viaje, ida y vuelta (hoy 26)</span></div></div>
+      </div>
+      <div class="sf">
+        <figure class="fg"><figcaption class="fl"><b>Fig. 03</b><span>Pruébalo: elige cuántos repartidores</span></figcaption>
+          <div class="sim" data-sim="repartidores">
+            <div class="ctl"><span>Repartidores en hora punta</span><div class="pick" role="group" aria-label="Repartidores"><button type="button" data-v="1">1</button><button type="button" data-v="2">2</button><button type="button" data-v="3">3</button></div></div>
+            <div class="read"><div><b data-out="c">2,3</b><span>pedidos por hora que entregamos</span></div><div><b>2,8</b><span>pedidos por hora que piden</span></div><div class="key"><b data-out="perdida">18 %</b><span data-out="perdidaTxt">se pierde</span></div></div>
+            <div><div class="gauge" aria-hidden="true"><i></i><s></s></div><div class="gauge-l"><span>capacidad</span><span>demanda ▲</span></div></div>
+          </div>
+          <p class="cap"><b>Con dos repartidores ya no se pierde nada.</b></p>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ANCHO: imagen real + antes/después + lista con íconos -->
+    <section class="sec ancho" id="s-hoy">
+      <div class="sh"><span class="n"></span><h2>Así se ve hoy la hora punta, y así cambiaría</h2></div>
+      <div class="st"><p>Imágenes reales (fotos, capturas, mapas) ayudan a que el lector reconozca de qué se habla. Siempre con pie y crédito.</p></div>
+      <div class="sf">
+        <div class="img-row">
+          <figure class="img"><div class="ph">IMAGEN REAL · foto, captura o mapa<br>(&lt;img src="…" alt="…"&gt;)</div><figcaption class="cap"><b>Pedidos esperando a las 13:00 de un viernes.</b><span class="src">Foto: equipo de la tienda, sep 2026.</span></figcaption></figure>
+          <ul class="ilist">
+            <li><svg class="ic a"><use href="#i-reloj"/></svg><div><b>52 → 30 minutos</b><span>de espera en hora punta</span></div></li>
+            <li><svg class="ic"><use href="#i-ruta"/></svg><div><b>2 zonas</b><span>norte y sur, viajes más cortos</span></div></li>
+            <li><svg class="ic"><use href="#i-personas"/></svg><div><b>1 persona más</b><span>solo 6 horas al día</span></div></li>
+          </ul>
+        </div>
+        <div class="ba" style="margin-top:22px">
+          <div><span class="k">Hoy</span><span class="v">1 de 6</span><span class="l">pedidos perdidos en hora punta</span></div>
+          <div class="arrow" aria-hidden="true">→</div>
+          <div class="inv"><span class="k">Con la opción B</span><span class="v">0</span><span class="l">pedidos perdidos, según el cálculo</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ANCHO: opciones en tarjetas; la recomendada invertida -->
+    <section class="sec ancho" id="s-opciones">
+      <div class="sh"><span class="n"></span><h2>Un segundo repartidor es la opción que más rinde</h2></div>
+      <div class="st"><p>Recomiendo la opción B: cuesta $0,9 millones al mes y recupera unos $1,6 millones en pedidos que hoy se pierden.</p></div>
+      <div class="sf"><div class="cards c3">
+        <div class="card"><span class="ol">A</span><b>Seguir igual</b><p>Se pierden ~$1,9 M al mes</p><div class="oc">$0<small>al mes</small></div></div>
+        <div class="card inv"><span class="ol">B</span><b>Segundo repartidor <span class="tag">Recomendada</span></b><p>Recupera ~$1,6 M al mes</p><div class="oc">$0,9 M<small>al mes</small></div></div>
+        <div class="card"><span class="ol">C</span><b>App de terceros</b><p>Cubre la punta, cobra 25 %</p><div class="oc">$1,4 M<small>al mes</small></div></div>
+      </div></div>
+    </section>
+
+    <!-- ANCHO: decisiones punto por punto. Cada ítem: problema en lenguaje simple, propuesta y botones; el script exporta las respuestas en Markdown -->
+    <section class="sec ancho" id="s-decisiones">
+      <div class="sh"><span class="n"></span><h2>Necesito tu respuesta en tres puntos</h2></div>
+      <div class="st"><p>Responde con los botones y, si quieres, agrega una línea. Al terminar, copia las respuestas y pégalas en el chat o en un correo.</p></div>
+      <div class="sf"><div class="decision" data-id="decisiones">
+        <article class="dec-item" data-id="d1">
+          <header><h3>Sumar un segundo repartidor en hora punta</h3><span class="prio alta">Alta</span></header>
+          <p class="dec-prob"><b>El problema</b>Con un solo repartidor, en la hora punta se cancela 1 de cada 6 pedidos porque la espera pasa de 45 minutos.</p>
+          <p class="dec-prop"><b>Propuesta</b>Contratar a una persona más, solo de 12:00 a 15:00 y de 19:00 a 22:00. Cuesta $0,9 millones al mes.</p>
+        </article>
+        <article class="dec-item" data-id="d2">
+          <header><h3>Repartir el barrio en dos zonas</h3><span class="prio media">Media</span></header>
+          <p class="dec-prob"><b>El problema</b>Cada viaje cruza todo el barrio, por eso un repartidor tarda 26 minutos en volver.</p>
+          <p class="dec-prop"><b>Propuesta</b>Una zona norte y una sur, una persona en cada una. Los viajes se acortan y entra más gente por hora.</p>
+        </article>
+        <article class="dec-item" data-id="d3">
+          <header><h3>Dejar la app de terceros como respaldo</h3><span class="prio baja">Baja</span></header>
+          <p class="dec-prob"><b>El problema</b>En fechas especiales la demanda supera lo que dos personas alcanzan a entregar.</p>
+          <p class="dec-prop"><b>Propuesta</b>No contratarla ahora; activarla solo esos días, aunque cobre 25 % de comisión.</p>
+        </article>
+      </div></div>
+    </section>
+
+    <!-- ANCHO: pasos en tarjetas -->
+    <section class="sec ancho" id="s-plan">
+      <div class="sh"><span class="n"></span><h2>Se puede partir el 3 de noviembre</h2></div>
+      <div class="st"><p>Tres pasos, con una revisión a las cuatro semanas para decidir si el segundo turno se queda.</p></div>
+      <div class="sf"><div class="cards c3">
+        <div class="card"><span class="d">3 nov</span><b>Contratar el segundo repartidor</b><span>Solo de 12:00 a 15:00 y de 19:00 a 22:00.</span></div>
+        <div class="card"><span class="d">10 nov</span><b>Repartir las zonas en dos</b><span>Norte y sur del barrio, para viajes más cortos.</span></div>
+        <div class="card"><span class="d">8 dic</span><b>Medir cuatro semanas</b><span>Si se pierden menos de 1 de cada 20 pedidos, se queda.</span></div>
+      </div></div>
+    </section>
+
+    <!-- ANCHO: lista de verificación con check; el avance se recuerda en el navegador de quien lee -->
+    <section class="sec ancho" id="s-listo">
+      <div class="sh"><span class="n"></span><h2>Antes de partir, hay tres cosas que dejar listas</h2></div>
+      <div class="st"><p>Marca cada una cuando esté hecha. Se queda guardado en tu navegador.</p></div>
+      <div class="sf"><ol class="pasos-check" data-id="listo">
+        <li><label><input type="checkbox"><span class="pc-t"><b>Publicar el aviso del cargo</b><small>Medio turno, solo en hora punta.</small></span></label><span class="prio alta">Alta</span></li>
+        <li><label><input type="checkbox"><span class="pc-t"><b>Definir las dos zonas en el mapa</b><small>Norte y sur, con la calle de corte.</small></span></label><span class="prio media">Media</span></li>
+        <li><label><input type="checkbox"><span class="pc-t"><b>Anotar la espera cada día</b><small>Una planilla simple, para decidir el 8 de diciembre.</small></span></label><span class="prio baja">Baja</span></li>
+      </ol></div>
+    </section>
+
+    <!-- ANCHO: las preguntas que el lector va a hacer, respondidas -->
+    <section class="sec ancho" id="s-preguntas">
+      <div class="sh"><span class="n"></span><h2>Lo que te vas a preguntar</h2></div>
+      <div class="st"><p>Las dudas que suelen aparecer antes de decidir, con su respuesta corta.</p></div>
+      <div class="sf"><div class="cards c2">
+        <div class="card"><b>¿Y si en verano baja la demanda?</b><span>El segundo turno es solo en hora punta y se revisa el 8 de diciembre.</span></div>
+        <div class="card"><b>¿Por qué no subir el precio del delivery?</b><span>Bajaría los pedidos justo en el canal que más crece. El problema es la entrega, no el precio.</span></div>
+        <div class="card"><b>¿Cuándo se ve el resultado?</b><span>La espera debería bajar de 52 a unos 30 minutos la primera semana.</span></div>
+        <div class="card"><b>¿Y la opción C más adelante?</b><span>Queda de respaldo para fechas especiales.</span></div>
+      </div></div>
+    </section>
+
+    <!-- ANCHO: de dónde sale cada número (dato, estimado o supuesto) -->
+    <section class="sec ancho" id="s-fuentes">
+      <div class="sh"><span class="n"></span><h2>De dónde sale cada número</h2></div>
+      <div class="st"><p>Cada cifra dice si es un <span class="chip">dato</span> medido, un <span class="chip est">estimado</span> o un <span class="chip sup">supuesto</span>. Lo que no es dato se confirma o se revisa.</p></div>
+      <div class="sf"><div class="cards c2">
+        <div class="card"><div class="top"><b>Ventas por canal, enero a septiembre</b><span class="chip">dato</span></div><span>Sistema de caja, exportación del 30 de septiembre.</span></div>
+        <div class="card"><div class="top"><b>Pedidos perdidos en hora punta</b><span class="chip est">estimado</span></div><span>Cancelaciones de la app en 4 semanas.</span></div>
+        <div class="card"><div class="top"><b>Recupera ~$1,6 M al mes</b><span class="chip est">estimado</span></div><span>Pedidos perdidos × ticket promedio de $9.800.</span></div>
+        <div class="card"><div class="top"><b>La demanda se mantiene</b><span class="chip sup">supuesto</span></div><span>Sin datos de temporadas anteriores; se revisa el 8 de diciembre.</span></div>
+      </div></div>
+    </section>
+
+    <section class="sec ancho" id="s-anexo">
+      <div class="sh"><span class="n">+</span><h2>Anexo</h2></div>
+      <div class="st"><p>Glosario, método y supuestos, para quien quiera el detalle.</p></div>
+      <div class="sf">
+        <details class="ax"><summary>Glosario</summary><div><dl class="gl"><dt>Hora punta</dt><dd>12:00 a 15:00 y 19:00 a 22:00, cuando llegan 6 de cada 10 pedidos.</dd><dt>Pedido perdido</dt><dd>Pedido que el cliente cancela porque la espera pasó de 45 minutos.</dd></dl></div></details>
+        <details class="ax"><summary>Método y supuestos</summary><div><p>Cálculos, fórmulas y supuestos completos, plegados.</p></div></details>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ===================== SIMULADORES =====================
+   Cada [data-sim="nombre"] usa la función de aquí con ese nombre: recibe el valor elegido
+   y devuelve los textos de cada [data-out] más el avance del medidor (0 a 1) y la marca. */
+const SIMULADORES = {
+  repartidores(r) {
+    const c = r * 60 / 26, piden = 2.8, perdida = Math.max(0, (piden - c) / piden);
+    return {
+      c: c.toFixed(1).replace('.', ','),
+      perdida: Math.round(perdida * 100) + ' %',
+      perdidaTxt: perdida > 0 ? `se pierde (1 de cada ${Math.round(1 / perdida)})` : 'no se pierde nada',
+      gauge: Math.min(1, c / 7), marca: piden / 7,
+    };
+  },
+};
+
+(() => {
+  // Números de sección e índice desde los <h2>
+  const secs = [...document.querySelectorAll('main > section[id]')];
+  let k = 0;
+  secs.forEach(s => { const n = s.querySelector('.sh .n'); if (n && !n.textContent.trim()) n.textContent = String(++k).padStart(2, '0'); });
+  const items = secs.map(s => `<li><a href="#${s.id}" data-id="${s.id}"><span>${s.querySelector('h2').textContent}</span></a></li>`).join('');
+  document.getElementById('toc').innerHTML = items;
+  document.getElementById('tocMob').innerHTML = items;
+  const mob = document.getElementById('mob');
+  mob.querySelector('button').onclick = () => mob.classList.toggle('open');
+  mob.querySelectorAll('a').forEach(a => a.addEventListener('click', () => mob.classList.remove('open')));
+
+  // Sección activa en el índice
+  const links = [...document.querySelectorAll('.toc a')];
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) links.forEach(a => a.classList.toggle('on', a.dataset.id === e.target.id)); }), { rootMargin: '-25% 0px -65% 0px' });
+    secs.forEach(s => io.observe(s));
+  }
+
+  // La columna lateral nunca tiene scroll: si no cabe, esconde lo secundario paso a paso
+  const rail = document.getElementById('rail');
+  const fitRail = () => {
+    rail.classList.remove('t1', 't2', 't3');
+    if (getComputedStyle(rail).position !== 'sticky') return;
+    for (const t of ['t1', 't2', 't3']) { if (rail.scrollHeight <= rail.clientHeight + 1) break; rail.classList.add(t); }
+  };
+  addEventListener('resize', fitRail); fitRail(); document.fonts?.ready.then(fitRail);
+
+  // Pictogramas "N de cada 10"
+  document.querySelectorAll('.waffle').forEach(w => { const n = +getComputedStyle(w).getPropertyValue('--n') || 0; w.innerHTML = Array.from({ length: 10 }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join(''); });
+
+  // Simuladores
+  document.querySelectorAll('[data-sim]').forEach(el => {
+    const fn = SIMULADORES[el.dataset.sim]; if (!fn) return;
+    const btns = [...el.querySelectorAll('.pick button')];
+    const upd = v => {
+      btns.forEach(b => b.setAttribute('aria-pressed', b.dataset.v === String(v)));
+      const r = fn(+v);
+      for (const [key, val] of Object.entries(r)) el.querySelectorAll(`[data-out="${key}"]`).forEach(o => o.textContent = val);
+      const g = el.querySelector('.gauge'); if (g) { g.querySelector('i').style.width = (r.gauge * 100) + '%'; g.querySelector('s').style.left = (r.marca * 100) + '%'; }
+    };
+    btns.forEach(b => b.addEventListener('click', () => upd(b.dataset.v)));
+    upd(btns[0]?.dataset.v);
+  });
+
+  // Tiempo de lectura
+  const words = document.querySelector('main').innerText.split(/\s+/).length;
+  const rt = document.getElementById('rt'); if (rt) rt.textContent = `${Math.max(1, Math.round(words / 220))} min`;
+
+  // Tema claro/oscuro (sigue al sistema; el botón lo cambia y se recuerda en este navegador)
+  const root = document.documentElement;
+  try { const t = localStorage.getItem('tema'); if (t) root.dataset.theme = t; } catch (e) {}
+  document.getElementById('themeBtn').onclick = () => {
+    const dark = getComputedStyle(root).getPropertyValue('--B').trim() === '#111111';
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('tema', root.dataset.theme); } catch (e) {}
+  };
+  addEventListener('beforeprint', () => document.querySelectorAll('details').forEach(d => d.open = true));
+})();
+</script>
+
+<script>
+/* ===================== DECISIONES Y PASOS CON CHECK =====================
+   .decision: el script agrega a cada .dec-item los botones De acuerdo / No / No entendí y una línea de comentario,
+   y una barra para copiar o bajar las respuestas en Markdown. Todo queda en localStorage de este navegador.
+   .pasos-check: cada casilla se recuerda; data-hechos y data-total alimentan el contador. */
+(() => {
+  const guardado = (clave, valor) => {
+    try { if (valor === undefined) return JSON.parse(localStorage.getItem(clave) || 'null'); localStorage.setItem(clave, JSON.stringify(valor)); } catch (e) { /* sin almacenamiento: queda en memoria */ }
+    return null;
+  };
+  const ruta = location.pathname;
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+
+  // ---- Pasos con check ----
+  document.querySelectorAll('.pasos-check').forEach((ol, k) => {
+    const clave = `pasos:${ruta}:${ol.dataset.id || k}`, cajas = [...ol.querySelectorAll('input[type=checkbox]')];
+    const marcadas = new Set(guardado(clave) || []);
+    const cuenta = () => { ol.dataset.total = cajas.length; ol.dataset.hechos = cajas.filter(c => c.checked).length; };
+    cajas.forEach((c, i) => { c.checked = marcadas.has(i); c.addEventListener('change', () => { cuenta(); guardado(clave, cajas.flatMap((x, j) => x.checked ? [j] : [])); }); });
+    cuenta();
+  });
+
+  // ---- Decisiones ----
+  const RESP = { si: 'De acuerdo', no: 'No', nose: 'No entendí' };
+  document.querySelectorAll('.decision').forEach((dec, k) => {
+    const clave = `decision:${ruta}:${dec.dataset.id || k}`, items = [...dec.querySelectorAll('.dec-item')];
+    const est = guardado(clave) || {};
+    items.forEach((it, i) => { if (!it.dataset.id) it.dataset.id = 'd' + (i + 1); });
+    const aviso = Object.assign(document.createElement('span'), { className: 'dec-aviso' });
+    aviso.setAttribute('role', 'status');
+    const titulo = it => norm(it.querySelector('h3')?.textContent);
+    const guardarTodo = () => guardado(clave, est);
+
+    items.forEach((it, i) => {
+      const id = it.dataset.id, botones = document.createElement('div'), nota = document.createElement('input');
+      botones.className = 'dec-btns'; botones.setAttribute('role', 'group'); botones.setAttribute('aria-label', 'Tu respuesta');
+      for (const [r, txt] of Object.entries(RESP)) {
+        const b = document.createElement('button'); b.type = 'button'; b.dataset.r = r; b.textContent = txt; botones.append(b);
+      }
+      nota.className = 'dec-nota'; nota.type = 'text'; nota.maxLength = 400; nota.setAttribute('aria-label', 'Comentario (opcional)');
+      it.append(botones, nota);
+      const pintar = () => {
+        const e = est[id] || {};
+        it.dataset.r = e.r || '';
+        botones.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.r === e.r)));
+        nota.placeholder = e.r === 'nose' ? '¿Qué parte no quedó clara?' : 'Comentario (opcional)';
+        if (document.activeElement !== nota) nota.value = e.c || '';
+        const hechas = items.filter(x => est[x.dataset.id]?.r).length;
+        cuenta.textContent = `${hechas} de ${items.length} respondidas`;
+      };
+      botones.addEventListener('click', ev => {
+        const b = ev.target.closest('button'); if (!b) return;
+        const e = est[id] = est[id] || {};
+        e.r = e.r === b.dataset.r ? '' : b.dataset.r;   // otro clic en el mismo botón lo desmarca
+        guardarTodo(); items.forEach(x => x._pintar()); if (e.r === 'nose') nota.focus();
+      });
+      nota.addEventListener('input', () => { const e = est[id] = est[id] || {}; e.c = nota.value; guardarTodo(); });
+      it._pintar = pintar;
+    });
+
+    const md = () => {
+      const l = items.map((it, i) => { const e = est[it.dataset.id] || {}; const c = norm(e.c);
+        return `- ${i + 1} · ${titulo(it)}: ${e.r ? RESP[e.r] : 'sin responder'}${c ? ' — ' + c : ''}`; });
+      const hechas = items.filter(it => est[it.dataset.id]?.r).length;
+      return `Respuestas sobre «${norm(document.title)}» (${hechas} de ${items.length}):\n${l.join('\n')}\n`;
+    };
+    const decir = t => { aviso.textContent = t; clearTimeout(decir.t); decir.t = setTimeout(() => aviso.textContent = '', 2600); };
+    const cuenta = Object.assign(document.createElement('span'), { className: 'dec-cuenta' });
+    const btn = (txt, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = txt; if (cls) b.className = cls; b.addEventListener('click', fn); return b; };
+    const barra = Object.assign(document.createElement('div'), { className: 'dec-barra' });
+    barra.append(cuenta,
+      btn('Copiar respuestas', 'p', async () => {
+        const t = md(); let ok = false;
+        try { await navigator.clipboard.writeText(t); ok = true; } catch (e) {
+          const ta = Object.assign(document.createElement('textarea'), { value: t }); ta.style.cssText = 'position:fixed;left:-9999px'; document.body.append(ta); ta.select();
+          try { ok = document.execCommand('copy'); } catch (e2) { /* nada */ } ta.remove();
+        }
+        decir(ok ? 'Copiadas. Pégalas en el chat o en un correo.' : 'No pude copiar: usa "Bajar .respuestas.md".');
+      }),
+      btn('Bajar .respuestas.md', '', () => {
+        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([md()], { type: 'text/markdown;charset=utf-8' })), download: ((ruta.split('/').pop() || 'informe').replace(/\.[a-z0-9]+$/i, '') || 'informe') + '.respuestas.md' });
+        document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      }),
+      btn('Borrar respuestas', '', () => { for (const x of Object.keys(est)) delete est[x]; guardarTodo(); items.forEach(x => x._pintar()); decir('Respuestas borradas.'); }),
+      aviso);
+    dec.append(barra);
+    items.forEach(x => x._pintar());
+    (window.__decisiones = window.__decisiones || []).push({ markdown: md });
+  });
+})();
+</script>
+
+<script>
+/* >>> comentar.js (copia de assets/comentar.js: si cambias uno, copia el otro) */
+/* ===================== MODO COMENTAR (comentar.js) =====================
+   Módulo autocontenido, sin dependencias: se pega entero dentro de un <script> de la plantilla (informe o deck).
+   Quien lee el documento deja notas ancladas a lo que ve; las copia como Markdown y se las pasa a quien lo hizo.
+
+   Uso del lector: tecla C (o el botón "Comentar") prende el modo; un clic sobre cualquier cosa abre la nota
+   (en el deck, el clic NO cambia de lámina ni sigue enlaces mientras el modo está prendido). Esc sale.
+   Las notas se guardan en el navegador (localStorage, una clave por documento) y se vuelven a ubicar al cargar.
+
+   Para la plantilla:
+   · window.__comentar.abrir() / cerrar() / alternar()  → prender o apagar el modo.
+   · window.__comentar.montarEn(panel, {cerrar})        → agrega "Comentar" y "Ver comentarios" a un panel de
+     opciones ya armado (copia las clases del primer botón role="switch" del panel). Sin panel, el módulo
+     dibuja su propio botón flotante abajo a la izquierda (no en un deck: allí solo la tecla C).
+   · window.__comentar.ignorar('.mi-ui')                → clases de UI ajena que nunca se comentan.
+   · Lee window.__deck (slides, i, show) si existe: guarda lámina y título; si no, sección y su <h2>.
+   · Evento document 'comentar:modo' {detail:{activo}} por si la plantilla quiere pausar algo.
+   · Invisible al imprimir y con ?estatico (ahí expone un objeto inerte). Respeta e.defaultPrevented y .nar-ui. */
+(() => {
+  'use strict';
+  if (window.__comentar) return;
+  const raiz = document.documentElement;
+  if (new URLSearchParams(location.search).has('estatico')) {
+    window.__comentar = { inerte: true, activo: false, abrir() {}, cerrar() {}, alternar() {}, montarEn() {}, ignorar() {}, notas: () => [], markdown: () => '' };
+    return;
+  }
+
+  const ESTILO = `
+.cm-capa{position:absolute;left:0;top:0;width:0;height:0;z-index:8900;pointer-events:none;display:none}
+html.cm-ver .cm-capa{display:block}
+.cm-pin{all:unset;box-sizing:border-box;position:absolute;width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;display:grid;place-items:center;pointer-events:auto;cursor:pointer;
+  background:var(--accent,#c9f25a);color:var(--bg,#111);font:600 12px/1 var(--mono,ui-monospace,Menlo,monospace);box-shadow:0 0 0 2px var(--bg,#111),0 4px 14px #0007;transition:transform .15s}
+.cm-pin:hover,.cm-pin:focus-visible{transform:scale(1.18)}
+.cm-pin:focus-visible{outline:2px solid var(--fg,#fff);outline-offset:3px}
+.cm-pin.cm-sel{transform:scale(1.25);box-shadow:0 0 0 2px var(--bg,#111),0 0 0 4px var(--accent,#c9f25a)}
+.cm-hover{position:absolute;z-index:8800;pointer-events:none;display:none;border:2px dashed var(--accent,#c9f25a);border-radius:var(--r,4px);background:color-mix(in oklab,var(--accent,#c9f25a) 12%,transparent)}
+html.cm-on .cm-hover.cm-v{display:block}
+.cm-hover.cm-flash{display:block;border-style:solid;animation:cm-fl 1.7s ease-out forwards}
+@keyframes cm-fl{0%,60%{opacity:1}100%{opacity:0}}
+html.cm-on body :not(.cm-ui):not(.cm-ui *){cursor:crosshair!important}
+.cm-ui,.cm-ui *{box-sizing:border-box}
+.cm-ui{font:400 14px/1.45 var(--sans,system-ui,-apple-system,"Segoe UI",sans-serif);color:var(--fg,#f1f1f1);letter-spacing:0;text-transform:none;text-align:left}
+.cm-ui button{font:inherit;color:inherit}
+.cm-btn{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;padding:9px 12px;border-radius:var(--r,4px);
+  border:1px solid color-mix(in oklab,currentColor 38%,transparent);font:500 12.5px/1 var(--sans,system-ui,sans-serif);color:inherit}
+.cm-btn:hover{background:color-mix(in oklab,currentColor 12%,transparent)}
+.cm-btn:focus-visible{outline:2px solid var(--accent,#c9f25a);outline-offset:2px}
+.cm-btn.cm-p{background:var(--accent,#c9f25a);border-color:var(--accent,#c9f25a);color:var(--bg,#111)}
+.cm-btn.cm-p:hover{filter:brightness(1.08)}
+.cm-btn.cm-t{border-color:transparent;padding:6px 8px;font-size:12px;color:var(--soft,#bbb)}
+.cm-btn.cm-t:hover{color:var(--fg,#fff)}
+.cm-btn[hidden]{display:none}
+.cm-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cm-lanz{position:fixed;left:16px;bottom:16px;z-index:9000;display:flex;gap:6px;color:var(--fg,#f1f1f1)}
+.cm-lanz .cm-btn{background:var(--bg,#111);border-color:var(--off,rgba(255,255,255,.28));box-shadow:0 10px 30px -14px #000a;padding:11px 14px}
+html.cm-on .cm-lanz{display:none}
+.cm-barra{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9000;display:none;align-items:center;gap:6px;padding:6px 6px 6px 16px;max-width:calc(100vw - 24px);
+  background:var(--fg,#f1f1f1);color:var(--bg,#111);border-radius:var(--r,4px);box-shadow:0 14px 40px -12px #000a}
+html.cm-on .cm-barra{display:flex}
+.cm-barra b{font:500 11px/1.3 var(--mono,ui-monospace,monospace);letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.cm-barra span{font-size:13px;opacity:.75;margin-right:6px}
+.cm-barra i{width:8px;height:8px;border-radius:50%;background:var(--accent,#c9f25a);box-shadow:0 0 0 2px color-mix(in oklab,var(--bg,#111) 40%,transparent);flex:none}
+.cm-aviso{position:fixed;left:50%;bottom:76px;transform:translate(-50%,8px);z-index:9100;padding:8px 14px;border-radius:var(--r,4px);background:var(--bg,#111);color:var(--fg,#fff);
+  border:1px solid var(--off,rgba(255,255,255,.3));font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:calc(100vw - 24px)}
+.cm-aviso.cm-v{opacity:1;transform:translate(-50%,0)}
+.cm-ed{position:fixed;z-index:9100;width:min(340px,calc(100vw - 24px));display:none;padding:14px;border-radius:var(--r,4px);background:var(--bg,#111);color:var(--fg,#f1f1f1);
+  border:1px solid var(--off,rgba(255,255,255,.3));box-shadow:0 24px 60px -16px #000c}
+.cm-ed.cm-v{display:block}
+.cm-ed .cm-q{font:500 11px/1.5 var(--mono,ui-monospace,monospace);letter-spacing:.06em;color:var(--faint,#999);margin:0 0 8px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
+.cm-ed textarea{display:block;width:100%;min-height:84px;resize:vertical;padding:9px 10px;border:1px solid var(--off,rgba(255,255,255,.3));border-radius:var(--r,4px);background:transparent;color:inherit;font:400 14px/1.5 var(--sans,system-ui,sans-serif);outline:0}
+.cm-ed textarea:focus{border-color:var(--accent,#c9f25a)}
+.cm-ed .cm-fila{display:flex;gap:6px;margin-top:10px;align-items:center}
+.cm-ed .cm-fila .cm-sp{flex:1}
+.cm-ed small{display:block;color:var(--faint,#999);font-size:11.5px;margin-top:8px}
+.cm-lista{position:fixed;top:0;right:0;bottom:0;z-index:9050;width:min(390px,100vw);display:flex;flex-direction:column;background:var(--bg,#111);color:var(--fg,#f1f1f1);border-left:1px solid var(--line,rgba(255,255,255,.15));
+  box-shadow:-30px 0 80px #0005;transform:translateX(102%);visibility:hidden;transition:transform .35s cubic-bezier(.22,1,.36,1),visibility 0s .35s}
+html.cm-lis .cm-lista{transform:none;visibility:visible;transition:transform .35s cubic-bezier(.22,1,.36,1)}
+.cm-lista header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:18px 18px 12px}
+.cm-lista h2{margin:0;font:500 11px/1.4 var(--mono,ui-monospace,monospace);letter-spacing:.14em;text-transform:uppercase;color:var(--faint,#999)}
+.cm-lista ol{list-style:none;margin:0;padding:0 12px;overflow:auto;flex:1;overscroll-behavior:contain}
+.cm-lista li{display:grid;grid-template-columns:28px 1fr;gap:10px;padding:12px 6px;border-top:1px solid var(--line,rgba(255,255,255,.15))}
+.cm-lista li>b{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent,#c9f25a);color:var(--bg,#111);font:600 12px/1 var(--mono,ui-monospace,monospace)}
+.cm-lista li.cm-huerfana>b{background:transparent;color:var(--faint,#999);border:1px dashed var(--off,rgba(255,255,255,.3))}
+.cm-lista .cm-lu{font:500 11px/1.5 var(--mono,ui-monospace,monospace);letter-spacing:.06em;text-transform:uppercase;color:var(--faint,#999)}
+.cm-lista .cm-lq{font-size:12.5px;color:var(--soft,#bbb);font-style:italic;margin:2px 0 4px;word-break:break-word}
+.cm-lista .cm-ln{white-space:pre-wrap;word-break:break-word}
+.cm-lista .cm-la{display:flex;gap:2px;margin:4px 0 0 -8px}
+.cm-lista .cm-vacio{padding:24px 18px;color:var(--soft,#bbb);font-size:13.5px;border:0}
+.cm-lista footer{display:flex;flex-wrap:wrap;gap:6px;padding:12px 18px 18px;border-top:1px solid var(--line,rgba(255,255,255,.15))}
+.cm-lista footer .cm-btn{flex:1 1 auto}
+.cm-op{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 8px;cursor:pointer}
+@media (max-width:600px){
+.cm-lanz .cm-btn{font-size:0;gap:0;padding:11px}
+  .cm-ed{left:8px!important;right:8px;top:auto!important;bottom:8px;width:auto}
+  .cm-barra{padding-left:12px;bottom:72px}.cm-barra span{display:none}.cm-aviso{bottom:132px}
+  .cm-lanz .cm-btn{padding:12px 14px}
+}
+@media (prefers-reduced-motion:reduce){.cm-lista,.cm-aviso,.cm-pin{transition:none}.cm-hover.cm-flash{animation:none}}
+@media print{.cm-ui,.cm-capa,.cm-hover,.cm-lanz,.cm-barra,.cm-lista,.cm-ed,.cm-aviso{display:none!important}}
+`;
+
+  // ---------- utilidades ----------
+  const h = (tag, props = {}, ...hijos) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (v == null || v === false) continue;
+      if (k === 'class') e.className = v; else if (k === 'text') e.textContent = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v === true ? '' : v);
+    }
+    hijos.flat().forEach(c => c != null && e.append(c));
+    return e;
+  };
+  const svgIcono = d => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('aria-hidden', 'true'); const p = document.createElementNS(s.namespaceURI, 'path'); p.setAttribute('d', d); s.append(p); return s; };
+  const ICONO = 'M21 12a8 8 0 0 1-11.6 7.1L3 20.5l1.6-4.9A8 8 0 1 1 21 12z';
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const IGN0 = '.cm-ui,.nar-ui,.nar-barra,.nar-prev,.nar-orilla' ;
+  let ignorarSel = IGN0;
+  const ignorado = t => !!t.closest?.(ignorarSel);
+  const escribiendo = e => { const t = e.composedPath?.()[0] || e.target; return !!(t && (t.isContentEditable || t.closest?.('input,textarea,select,[contenteditable]'))); };
+
+  // ---------- almacenamiento (una clave por documento) ----------
+  const CLAVE = 'comentarios:' + location.pathname;
+  let S = { notas: [] };
+  const leer = () => {
+    try {
+      const j = JSON.parse(localStorage.getItem(CLAVE) || 'null');
+      S = { notas: Array.isArray(j?.notas) ? j.notas.filter(n => n && typeof n.nota === 'string') : [] };
+    } catch (e) { /* sin almacenamiento: las notas viven en memoria */ }
+  };
+  const guardar = () => {
+    try { localStorage.setItem(CLAVE, JSON.stringify(S, (k, v) => k[0] === '_' ? undefined : v)); } catch (e) { /* idem */ }
+  };
+
+  // ---------- dónde está algo: unidad (lámina o sección), selector estable y extracto ----------
+  const tituloDe = nodo => norm(nodo?.dataset?.titulo || nodo?.querySelector?.('h1,h2,[data-k=titulo]')?.textContent);
+  const unidadDe = el => {
+    const D = window.__deck;
+    if (D?.slides) {
+      let n = D.slides.indexOf(el.closest('.slide')); if (n < 0) n = D.i ?? 0;
+      return { tipo: 'Lámina', n: n + 1, titulo: tituloDe(D.slides[n]) };
+    }
+    const secs = [...document.querySelectorAll('main > section')];
+    const s = el.closest('main > section');
+    if (s) return { tipo: 'Sección', n: secs.indexOf(s) + 1, titulo: norm(s.querySelector('h2')?.textContent) };
+    return { tipo: '', n: 0, titulo: '' };
+  };
+  const pasoDe = el => { const s = el.closest?.('[data-step]'); const p = s ? parseInt(s.dataset.step, 10) : 0; return p > 0 ? p : 0; };
+  const unico = sel => { try { return document.querySelectorAll(sel).length === 1; } catch (e) { return false; } };
+  const selectorDe = el => {
+    const partes = [];
+    let n = el, ancla = false;
+    while (n && n.nodeType === 1 && n !== document.body && n !== document.documentElement) {
+      if (n.id) { const s = '#' + CSS.escape(n.id); if (unico(s)) { partes.unshift(s); ancla = true; break; } }
+      const di = n.getAttribute('data-id');
+      if (di) { const s = `[data-id="${di.replace(/"/g, '\\"')}"]`; if (unico(s)) { partes.unshift(s); ancla = true; break; } }
+      const p = n.parentElement; if (!p) break;
+      partes.unshift(`${n.localName}:nth-child(${[...p.children].indexOf(n) + 1})`);
+      n = p;
+    }
+    return (ancla ? '' : 'body > ') + partes.join(' > ');
+  };
+  const textoDe = el => {
+    const dir = el.getAttribute?.('aria-label') || el.getAttribute?.('alt') || '';
+    if (el instanceof SVGElement || el.localName === 'img') return norm(dir || el.querySelector?.('title')?.textContent || '');
+    return norm(el.innerText ?? el.textContent) || norm(dir || el.querySelector?.('[aria-label]')?.getAttribute('aria-label') || el.querySelector?.('img[alt]')?.alt);
+  };
+  const extractoDe = el => {
+    const t = textoDe(el).replace(/"/g, "'");
+    if (t.length <= 70) return t;
+    const c = t.slice(0, 70), k = c.lastIndexOf(' ');
+    return (k > 40 ? c.slice(0, k) : c) + '…';
+  };
+  const buscarPorTexto = n => {
+    const ext = (n.extracto || '').replace(/…$/, '');
+    if (ext.length < 6) return null;
+    let mejor = null, mejorLen = Infinity;
+    for (const e of document.body.querySelectorAll('*')) {
+      if (e.closest('.cm-ui,script,style')) continue;
+      const t = textoDe(e);
+      if (t.replace(/"/g, "'").startsWith(ext) && t.length < mejorLen) { mejor = e; mejorLen = t.length; }
+    }
+    return mejor;
+  };
+  const resolver = n => {
+    if (n._el?.isConnected) return n._el;
+    let e = null;
+    try { e = document.querySelector(n.sel); } catch (err) { /* selector roto */ }
+    if (e && n.extracto && !textoDe(e).replace(/"/g, "'").startsWith(n.extracto.replace(/…$/, '').slice(0, 24))) e = buscarPorTexto(n) || e;
+    if (!e) e = buscarPorTexto(n);
+    return (n._el = e);
+  };
+  const visible = el => {
+    if (!el?.isConnected) return false;
+    const r = el.getBoundingClientRect(); if (!r.width && !r.height) return false;
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+    }
+    return true;
+  };
+
+  // ---------- notas ----------
+  const ordenadas = () => [...S.notas].sort((a, b) => (a.unidad?.n || 0) - (b.unidad?.n || 0) || a.t - b.t);
+  const etiqueta = n => {
+    const u = n.unidad || {};
+    const base = u.tipo ? `${u.tipo} ${u.n}${n.paso ? ` (paso ${n.paso})` : ''}` : 'Inicio';
+    return [base, u.titulo].filter(Boolean).join(' · ');
+  };
+  const markdown = () => {
+    const l = ordenadas();
+    if (!l.length) return '';
+    const cab = `Comentarios sobre «${norm(document.title) || 'este documento'}» (${l.length}):`;
+    return cab + '\n' + l.map(n => `- ${etiqueta(n)}${n.extracto ? ` · "${n.extracto}"` : ''}: ${n.nota.replace(/\s*\n\s*/g, ' / ')}`).join('\n') + '\n';
+  };
+  const nombreArchivo = () => ((location.pathname.split('/').pop() || 'documento').replace(/\.[a-z0-9]+$/i, '') || 'documento') + '.comentarios.md';
+
+  // ---------- interfaz ----------
+  let activo = false, listaAbierta = false, edSt = null, conPanel = false, construida = false;
+  let capa, hover, barra, lista, ed, edTA, edQ, edBorrar, aviso, lanz, ul, cuentaB, cuentaL, entrada, entradaLista, avisoT = 0;
+
+  const decir = txt => {
+    if (!aviso) return;
+    aviso.textContent = txt; aviso.classList.add('cm-v');
+    clearTimeout(avisoT); avisoT = setTimeout(() => aviso.classList.remove('cm-v'), 2200);
+  };
+  const cuenta = () => S.notas.length;
+
+  const ubicar = () => {
+    if (!construida || !raiz.classList.contains('cm-ver')) return;
+    const sx = scrollX, sy = scrollY, ancho = raiz.scrollWidth;
+    ordenadas().forEach((n, k) => {
+      const pin = n._pin; if (!pin) return;
+      const el = resolver(n);
+      if (!el || !visible(el)) { pin.hidden = true; return; }
+      const r = el.getBoundingClientRect();
+      pin.hidden = false;
+      pin.style.left = clamp(r.left + sx + (n.fx ?? .5) * r.width, 14, Math.max(14, ancho - 14)) + 'px';
+      pin.style.top = Math.max(14, r.top + sy + (n.fy ?? .5) * r.height) + 'px';
+    });
+  };
+  let raf = 0;
+  const programar = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; ubicar(); }); };
+
+  const actualizarVista = () => {
+    const ver = activo || listaAbierta;
+    raiz.classList.toggle('cm-on', activo);
+    raiz.classList.toggle('cm-lis', listaAbierta);
+    raiz.classList.toggle('cm-ver', ver);
+    entrada?.setAttribute('aria-checked', String(activo));
+    const c = cuenta();
+    if (cuentaB) cuentaB.textContent = c ? `Lista (${c})` : 'Lista';
+    if (cuentaL) cuentaL.textContent = c ? `Notas · ${c}` : '';
+    if (cuentaL) cuentaL.hidden = !c;
+    const sm = entrada?.querySelector('small'); if (sm) sm.textContent = activo ? 'Prendido: un clic en cualquier cosa deja una nota' : 'Un clic en cualquier cosa deja una nota';
+    const sm2 = entradaLista?.querySelector('small'); if (sm2) sm2.textContent = c ? `${c} ${c === 1 ? 'nota' : 'notas'}` : 'Aún no hay';
+    if (ver) programar();
+  };
+
+  const render = () => {
+    if (!construida) return;
+    capa.querySelectorAll('.cm-pin').forEach(p => p.remove());
+    const l = ordenadas();
+    l.forEach((n, k) => {
+      n._pin = h('button', { class: 'cm-pin', type: 'button', text: String(k + 1), title: n.nota, 'aria-label': `Nota ${k + 1}: ${n.nota}`, onclick: ev => { ev.stopPropagation(); editar(n); } });
+      capa.append(n._pin);
+    });
+    ul.replaceChildren(...(l.length ? l.map((n, k) => {
+      const huerfana = !resolver(n);
+      return h('li', { class: huerfana ? 'cm-huerfana' : '' },
+        h('b', { text: String(k + 1) }),
+        h('div', {},
+          h('div', { class: 'cm-lu', text: etiqueta(n) + (huerfana ? ' · ya no está' : '') }),
+          n.extracto ? h('div', { class: 'cm-lq', text: `"${n.extracto}"` }) : null,
+          h('div', { class: 'cm-ln', text: n.nota }),
+          h('div', { class: 'cm-la' },
+            h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Ir', onclick: () => ir(n) }),
+            h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Editar', onclick: () => editar(n) }),
+            h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Borrar', onclick: () => borrar(n) }))));
+    }) : [h('li', { class: 'cm-vacio', text: 'Aún no hay comentarios. Prende el modo comentar (tecla C) y haz clic en lo que quieras señalar.' })]));
+    actualizarVista();
+  };
+
+  const ir = n => {
+    const D = window.__deck, el = resolver(n);
+    if (D?.show && n.unidad?.tipo === 'Lámina') D.show(n.unidad.n - 1, n.paso || 0);
+    if (!el) { decir('Ese elemento ya no está en el documento'); return; }
+    el.closest('details')?.setAttribute('open', '');
+    if (!D) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (window.innerWidth < 700) cerrarLista();
+    setTimeout(() => {
+      const r = el.getBoundingClientRect();
+      Object.assign(hover.style, { left: r.left + scrollX + 'px', top: r.top + scrollY + 'px', width: r.width + 'px', height: r.height + 'px' });
+      hover.classList.remove('cm-flash'); void hover.offsetWidth; hover.classList.add('cm-flash');
+      programar();
+    }, D ? 520 : 450);
+  };
+
+  const borrar = n => { S.notas = S.notas.filter(x => x !== n); guardar(); if (edSt?.nota === n) cerrarEditor(false); render(); };
+
+  const posicionarEd = (x, y) => {
+    const w = Math.min(340, innerWidth - 24);
+    ed.style.left = clamp(x + 14, 12, innerWidth - w - 12) + 'px';
+    ed.style.top = clamp(y + 14, 12, Math.max(12, innerHeight - 250)) + 'px';
+  };
+  const abrirEditor = st => {
+    cerrarEditor(true);
+    edSt = st;
+    edQ.textContent = st.nota ? (st.nota.extracto ? `"${st.nota.extracto}"` : etiqueta(st.nota)) : (extractoDe(st.el) ? `"${extractoDe(st.el)}"` : 'Esta parte del documento');
+    edTA.value = st.nota?.nota || '';
+    edBorrar.hidden = !st.nota;
+    ed.classList.add('cm-v');
+    posicionarEd(st.x, st.y);
+    document.querySelectorAll('.cm-pin.cm-sel').forEach(p => p.classList.remove('cm-sel'));
+    st.nota?._pin?.classList.add('cm-sel');
+    setTimeout(() => edTA.focus(), 0);
+  };
+  const cerrarEditor = guardarTexto => {
+    if (!edSt) return;
+    const st = edSt, txt = edTA.value.trim();
+    edSt = null; ed.classList.remove('cm-v');
+    document.querySelectorAll('.cm-pin.cm-sel').forEach(p => p.classList.remove('cm-sel'));
+    if (!guardarTexto) return;
+    if (st.nota) { if (!txt) S.notas = S.notas.filter(x => x !== st.nota); else if (txt !== st.nota.nota) st.nota.nota = txt; else return; }
+    else if (txt) {
+      const r = st.el.getBoundingClientRect(), u = unidadDe(st.el);
+      S.notas.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t: Date.now(), unidad: u, paso: pasoDe(st.el),
+        sel: selectorDe(st.el), extracto: extractoDe(st.el),
+        fx: r.width ? +clamp((st.x - r.left) / r.width, 0, 1).toFixed(3) : .5, fy: r.height ? +clamp((st.y - r.top) / r.height, 0, 1).toFixed(3) : .5,
+        nota: txt, _el: st.el,
+      });
+    } else return;
+    guardar(); render();
+  };
+  const editar = n => {
+    const p = n._pin?.getBoundingClientRect();
+    abrirEditor({ nota: n, x: p && !n._pin.hidden ? p.left : innerWidth - 400, y: p && !n._pin.hidden ? p.top : 120 });
+  };
+
+  const copiar = async () => {
+    const md = markdown();
+    if (!md) { decir('Aún no hay comentarios'); return false; }
+    let ok = false;
+    try { await navigator.clipboard.writeText(md); ok = true; } catch (e) { /* cae al plan B */ }
+    if (!ok) {
+      const t = h('textarea', { style: 'position:fixed;left:-9999px;top:0', 'aria-hidden': 'true' }); t.value = md; barra.append(t); t.select();
+      try { ok = document.execCommand('copy'); } catch (e) { /* nada */ }
+      t.remove();
+    }
+    decir(ok ? `Copiados ${cuenta()} ${cuenta() === 1 ? 'comentario' : 'comentarios'}. Pégalos en el chat` : 'No pude copiar: usa "Bajar .comentarios.md"');
+    return ok;
+  };
+  const bajar = () => {
+    const md = markdown();
+    if (!md) { decir('Aún no hay comentarios'); return; }
+    const a = h('a', { href: URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' })), download: nombreArchivo() });
+    barra.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    decir(`Bajando ${nombreArchivo()}`);
+  };
+  let confirmarBorrado = 0;
+  const borrarTodo = ev => {
+    if (!cuenta()) return;
+    const b = ev.currentTarget;
+    if (!confirmarBorrado) { b.textContent = '¿Seguro? Otro clic'; confirmarBorrado = setTimeout(() => { confirmarBorrado = 0; b.textContent = 'Borrar todo'; }, 3000); return; }
+    clearTimeout(confirmarBorrado); confirmarBorrado = 0; b.textContent = 'Borrar todo';
+    S.notas = []; guardar(); render(); decir('Comentarios borrados');
+  };
+
+  const activar = v => {
+    v = !!v; if (v === activo) return;
+    activo = v;
+    if (!v) { cerrarEditor(true); hover.classList.remove('cm-v'); }
+    else if (!construida) construir();
+    actualizarVista();
+    if (v) decir('Modo comentar: haz clic en lo que quieras comentar');
+    document.dispatchEvent(new CustomEvent('comentar:modo', { detail: { activo } }));
+  };
+  const abrirLista = v => { listaAbierta = v !== false; if (!listaAbierta) cerrarEditor(true); actualizarVista(); if (listaAbierta) render(); };
+  const cerrarLista = () => abrirLista(false);
+
+  const construir = () => {
+    if (construida || !document.body) return;
+    const st = h('style', { id: 'cm-css' }); st.textContent = ESTILO; document.head.append(st);
+    capa = h('div', { class: 'cm-capa cm-ui' });
+    hover = h('div', { class: 'cm-hover' });
+    aviso = h('div', { class: 'cm-aviso cm-ui', role: 'status', 'aria-live': 'polite' });
+    cuentaB = h('button', { class: 'cm-btn', type: 'button', text: 'Lista', onclick: () => abrirLista(!listaAbierta) });
+    barra = h('div', { class: 'cm-barra cm-ui' }, h('i'), h('b', { text: 'Modo comentar' }), h('span', { text: 'Haz clic en lo que quieras comentar' }), cuentaB,
+      h('button', { class: 'cm-btn', type: 'button', onclick: () => activar(false) }, 'Salir ', h('b', { text: 'C' })));
+    cuentaL = h('button', { class: 'cm-btn', type: 'button', hidden: true, onclick: () => abrirLista(true) });
+    lanz = h('div', { class: 'cm-lanz cm-ui' },
+      h('button', { class: 'cm-btn', type: 'button', 'aria-label': 'Comentar (tecla C)', onclick: () => activar(true) }, svgIcono(ICONO), 'Comentar'), cuentaL);
+    ul = h('ol');
+    lista = h('aside', { class: 'cm-lista cm-ui', 'aria-label': 'Comentarios' },
+      h('header', {}, h('h2', { text: 'Comentarios' }), h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Cerrar', onclick: cerrarLista })),
+      ul,
+      h('footer', {},
+        h('button', { class: 'cm-btn cm-p', type: 'button', text: 'Copiar comentarios', onclick: copiar }),
+        h('button', { class: 'cm-btn', type: 'button', text: 'Bajar .comentarios.md', onclick: bajar }),
+        h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Borrar todo', onclick: borrarTodo })));
+    edQ = h('p', { class: 'cm-q' });
+    edTA = h('textarea', { rows: 3, placeholder: 'Escribe tu comentario…', 'aria-label': 'Comentario' });
+    edBorrar = h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Borrar', hidden: true, onclick: () => edSt?.nota && borrar(edSt.nota) });
+    ed = h('div', { class: 'cm-ed cm-ui', role: 'dialog', 'aria-label': 'Nueva nota' }, edQ, edTA,
+      h('div', { class: 'cm-fila' },
+        h('button', { class: 'cm-btn cm-p', type: 'button', text: 'Guardar', onclick: () => cerrarEditor(true) }),
+        h('button', { class: 'cm-btn', type: 'button', text: 'Cancelar', onclick: () => cerrarEditor(false) }),
+        h('span', { class: 'cm-sp' }), edBorrar),
+      h('small', { text: 'Ctrl o Cmd + Enter guarda · Esc cancela' }));
+    // Lo que ocurre dentro de nuestra interfaz no sube a la página (ni cambia la lámina, ni dispara atajos)
+    [lista, ed, barra, lanz, capa, aviso].forEach(n => ['click', 'keydown', 'keyup', 'touchstart', 'touchend', 'pointerdown'].forEach(t => n.addEventListener(t, ev => ev.stopPropagation())));
+    edTA.addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); cerrarEditor(true); } });
+    document.body.append(capa, hover, aviso, ed, lista, barra);
+    if (!conPanel && !window.__deck) document.body.append(lanz);
+    construida = true;
+    render();
+    // Mantener los pines pegados a su elemento
+    addEventListener('resize', programar);
+    addEventListener('scroll', programar, { passive: true, capture: true });
+    addEventListener('load', programar);
+    document.addEventListener('transitionend', programar, true);
+    document.addEventListener('animationend', programar, true);
+    document.fonts?.ready.then(programar);
+    new MutationObserver(ms => { if (raiz.classList.contains('cm-ver') && ms.some(m => !m.target.closest?.('.cm-ui,.cm-hover'))) programar(); })
+      .observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'open', 'hidden'] });
+    setInterval(() => { if (!document.hidden) ubicar(); }, 900);
+  };
+
+  // ---------- entradas del lector ----------
+  let seguir = 0;
+  addEventListener('mousemove', e => {
+    if (!activo || seguir) return;
+    seguir = requestAnimationFrame(() => {
+      seguir = 0;
+      const t = e.target;
+      if (!(t instanceof Element) || ignorado(t) || t === document.body || t === raiz) { hover.classList.remove('cm-v'); return; }
+      const el = t.closest('svg') || t, r = el.getBoundingClientRect();
+      Object.assign(hover.style, { left: r.left + scrollX + 'px', top: r.top + scrollY + 'px', width: r.width + 'px', height: r.height + 'px' });
+      hover.classList.remove('cm-flash'); hover.classList.add('cm-v');
+    });
+  }, { passive: true });
+
+  // El clic se toma en captura: así la lámina no cambia ni se sigue un enlace. Si otra herramienta
+  // (por ejemplo, un overlay de notas) ya lo usó (defaultPrevented) o es interfaz ajena, no se toca.
+  addEventListener('click', e => {
+    if (!activo || e.defaultPrevented || e.button) return;
+    const t = e.target;
+    if (!(t instanceof Element) || ignorado(t)) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    abrirEditor({ nota: null, el: t.closest('svg') || t, x: e.clientX, y: e.clientY });
+  }, true);
+
+  const api = window.__comentar = {
+    get activo() { return activo; },
+    get tecla() { return tecla; }, set tecla(v) { tecla = String(v).toLowerCase(); },
+    abrir() { activar(true); }, cerrar() { activar(false); }, alternar() { activar(!activo); },
+    lista: abrirLista, notas: () => ordenadas().map(n => ({ ...n, _el: undefined, _pin: undefined })),
+    markdown, copiar, bajar, ignorar(sel) { ignorarSel += ',' + sel; }, clave: CLAVE,
+    // Agrega las entradas al panel de opciones de la plantilla, con las clases de sus propios botones
+    montarEn(panel, opts = {}) {
+      if (!panel) return;
+      conPanel = true; lanz?.remove();
+      const modelo = panel.querySelector('button[role=switch]');
+      const clase = opts.clase || modelo?.className || 'cm-op';
+      const claseSw = opts.claseSwitch || modelo?.querySelector('i')?.className || '';
+      const titulo = panel.querySelector('h3') ? h(panel.querySelector('h3').localName, { text: 'Comentarios' }) : null;
+      entrada = h('button', { class: clase + ' cm-entrada', type: 'button', role: 'switch', 'aria-checked': String(activo) },
+        h('span', {}, 'Comentar', h('kbd', { text: 'C' }), h('small')), claseSw ? h('i', { class: claseSw }) : null);
+      entrada.addEventListener('click', () => { const a = !activo; activar(a); if (a) opts.cerrar?.(); });
+      entradaLista = h('button', { class: clase + ' cm-entrada-lista', type: 'button' }, h('span', {}, 'Ver comentarios', h('small')));
+      entradaLista.addEventListener('click', () => { abrirLista(true); opts.cerrar?.(); });
+      const nodos = [titulo, entrada, entradaLista].filter(Boolean);
+      opts.antes ? opts.antes.before(...nodos) : panel.append(...nodos);
+      actualizarVista();
+    },
+  };
+  let tecla = 'c';
+
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (edSt) { e.preventDefault(); e.stopImmediatePropagation(); cerrarEditor(false); }
+      else if (activo) { e.preventDefault(); e.stopImmediatePropagation(); activar(false); }
+      else if (listaAbierta) { e.preventDefault(); e.stopImmediatePropagation(); cerrarLista(); }
+      return;
+    }
+    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || escribiendo(e)) return;
+    if (e.key.toLowerCase() === tecla) { e.preventDefault(); e.stopImmediatePropagation(); activar(!activo); }
+  }, true);
+
+  addEventListener('storage', e => { if (e.key === CLAVE) { leer(); render(); } });
+
+  leer();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', construir); else construir();
+})();
+/* <<< comentar.js */
+</script>
+</body>
+</html>

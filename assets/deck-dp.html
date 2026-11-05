@@ -1,0 +1,2049 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck DP de ejemplo</title>
+<!-- Para usarla sin internet: python3 scripts/empaquetar.py entrada.html salida.html --remoto -->
+<style>
+/* =====================================================================
+   TOKENS. Base blanco sobre negro (o al revés con data-theme="light");
+   el acento solo marca. Cambia --hue según el tema.
+   ===================================================================== */
+:root{
+  --hue: 75;
+  --display: "Bebas Neue", Impact, "Arial Narrow", sans-serif;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --label: var(--sans);   /* etiquetas (marco, rótulos, fuentes): sans; cambia a var(--mono) si el estilo lo pide */
+  --r: 6px;               /* radio mínimo (en el lienzo de 1920 se ve como ~4 px) */
+  --ease: cubic-bezier(.22,1,.36,1);
+}
+:root,[data-theme=dark]{--B:#111111;--F:#f1f1f1;--M:#1a1a1a;--accent:oklch(.82 .15 var(--hue))}
+[data-theme=light]{--B:#fafafa;--F:#141414;--M:#efefef;--accent:oklch(.5 .16 var(--hue))}
+:root,[data-theme]{--bg:var(--B);--fg:var(--F);--muted:var(--M)}
+.inv{--bg:var(--F);--fg:var(--B);background:var(--bg)!important;color:var(--fg);border-color:var(--bg)!important}
+/* El acento sobre una pieza invertida usa el tono del tema contrario, para que se lea */
+:root .inv,[data-theme=dark] .inv{--accent:oklch(.52 .16 var(--hue))}
+[data-theme=light] .inv{--accent:oklch(.82 .15 var(--hue))}
+:root,[data-theme],.inv{
+  --soft:color-mix(in oklab,var(--fg) 72%,transparent);
+  --faint:color-mix(in oklab,var(--fg) 60%,transparent);
+  --line:color-mix(in oklab,var(--fg) 15%,transparent);
+  --off:color-mix(in oklab,var(--fg) 24%,transparent);
+}
+.inv .tag{border-color:var(--fg);color:var(--fg)}
+
+/* =====================================================================
+   MOTOR (no tocar salvo motivo): lienzo 1920×1080 escalado a la pantalla
+   ===================================================================== */
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;overflow:hidden}
+body{font-family:var(--sans);color:var(--fg);-webkit-font-smoothing:antialiased}
+.viewport{position:fixed;inset:0;overflow:hidden}
+.stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center}
+.slide{position:absolute;inset:0;overflow:hidden;background:var(--bg);color:var(--fg);padding:150px 130px 130px;
+  opacity:0;visibility:hidden;transition:opacity .4s var(--ease),visibility 0s .4s}
+.slide.on{opacity:1;visibility:visible;transition:opacity .4s var(--ease)}
+[data-step]{transition:opacity .45s var(--ease),transform .45s var(--ease)}
+[data-step]:not(.shown){opacity:0;transform:translateY(16px)}
+.ui{position:fixed;left:0;right:0;bottom:0;height:3px;z-index:5;pointer-events:none}
+.ui .bar{height:100%;background:var(--accent);width:0;transition:width .3s var(--ease)}
+.rotate{display:none}
+@media (orientation:portrait) and (max-width:700px){.rotate{display:block;position:fixed;left:0;right:0;bottom:16px;text-align:center;font:500 13px var(--sans);color:#aaa;z-index:6}}
+.notas{display:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.estatico *{transition:none!important;animation:none!important}
+.estatico [data-step]{opacity:1!important;transform:none!important}
+.estatico .ui,.estatico .rotate{display:none}
+.estatico .pasos-check *{transition:none!important}
+@media print{
+  @page{size:1920px 1080px;margin:0}
+  html,body{height:auto;overflow:visible;background:#fff}
+  .viewport{position:static;overflow:visible}
+  .stage{position:static;transform:none!important;width:1920px;height:auto}
+  .slide{position:relative;opacity:1;visibility:visible;width:1920px;height:1080px;break-after:page}
+  [data-step]{opacity:1!important;transform:none!important}
+  .ui,.rotate{display:none}
+  .logo-fijo:not(.logo-print){display:none!important}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+
+/* =====================================================================
+   MARCO DE CADA LÁMINA (se arma solo): arriba la sección y el título
+   corto del deck sobre una línea fina; abajo la fuente y el número.
+   ===================================================================== */
+.mbar{position:absolute;left:130px;right:130px;top:48px;display:flex;justify-content:space-between;gap:30px;
+  font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding-bottom:16px;border-bottom:1px solid var(--line);z-index:2}
+.mbar b{font-weight:500;color:var(--fg)}
+.mbar b::before{content:"";display:inline-block;width:10px;height:10px;background:var(--accent);margin-right:14px;vertical-align:1px}
+.srcl,.num{position:absolute;bottom:52px;font:400 22px var(--label);color:var(--faint);z-index:2}
+.srcl{left:130px;max-width:1200px}.num{right:130px;display:none}
+[data-numeros] .num{display:block}
+/* Capa fija (data-logo en .stage): un solo logo fuera de las láminas; no se anima al cambiar. Dos versiones
+   (data-logo para fondo claro, data-logo-oscuro para fondo oscuro) o, si falta la segunda, la primera se invierte.
+   data-logo-pos: inf-der (por defecto), inf-izq, sup-der, sup-izq. data-logo-alto: alto en px (por defecto 44).
+   el atributo data-sin-logo en una lámina oculta el logo en esa lámina. */
+.logo-fijo{position:absolute;z-index:3;pointer-events:none;height:var(--logo-h,44px);bottom:36px;right:130px;display:flex;align-items:center}
+.logo-fijo img{height:100%;width:auto;display:block}
+.logo-fijo img[hidden]{display:none}
+.logo-fijo img.inv-auto{filter:brightness(0) invert(1)}
+.logo-fijo[data-pos=inf-izq]{left:130px;right:auto}
+.logo-fijo[data-pos=sup-der]{top:6px;bottom:auto}
+.logo-fijo[data-pos=sup-izq]{top:6px;bottom:auto;left:130px;right:auto}
+[data-logo]:not([data-logo-pos=inf-izq]):not([data-logo-pos=sup-der]):not([data-logo-pos=sup-izq]) .num{right:calc(130px + var(--logo-w,0px) + 40px)}
+
+/* =====================================================================
+   TIPOGRAFÍA Y PIEZAS (lienzo de 1920; texto mínimo 22 px)
+   ===================================================================== */
+h1,h2,h3{margin:0;font-weight:400;font-family:var(--display);letter-spacing:1px}
+p{margin:0}
+.hl{color:var(--accent)}
+.k{display:block;font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.k.a{color:var(--accent)}
+.lead{font-size:32px;line-height:1.4;color:var(--soft)}
+ul.pts{list-style:none;margin:0;padding:0;display:grid;gap:30px}
+ul.pts li{font-size:34px;line-height:1.35;padding-left:48px;position:relative}
+ul.pts li::before{content:"";position:absolute;left:0;top:.62em;width:24px;height:3px;background:var(--accent)}
+ul.pts b{font-weight:600}
+.act{margin-top:46px;padding-top:28px;border-top:1px solid var(--line);font-size:28px;color:var(--soft)}
+.act b{color:var(--accent);font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;margin-right:16px}
+.tag{display:inline-block;font:500 22px/1.5 var(--label);letter-spacing:.06em;text-transform:uppercase;padding:0 12px;border:1px solid var(--accent);color:var(--accent);border-radius:var(--r);vertical-align:4px}
+/* Figura sin contenedor */
+.fg{margin:0}
+.fg .fl{display:flex;justify-content:space-between;gap:20px;font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);border-top:1px solid var(--fg);padding-top:14px;margin-bottom:30px}
+.fg .fl b{color:var(--fg);font-weight:500}
+.cap{font-size:24px;color:var(--soft);margin-top:22px}
+.cap b{color:var(--fg);font-weight:600}
+.chart{width:100%;height:auto;display:block;overflow:visible}
+.chart text{font:13px var(--sans);fill:var(--soft)}
+.chart .grid{stroke:var(--line)}
+.chart .ln-key{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.chart .ln-off{fill:none;stroke:var(--off);stroke-width:2.5}
+.chart .dot{fill:var(--accent)}
+.chart .lab-key{fill:var(--fg);font-weight:600}
+.chart .note{fill:var(--accent);font:500 13px var(--label)}
+.bars{display:grid;gap:28px}
+.bars>div{display:grid;grid-template-columns:220px 1fr 120px;align-items:center;gap:24px;font-size:28px}
+.bars>div::after{content:"";grid-column:2;grid-row:1;height:52px;width:calc(var(--v) * 100%);background:var(--off)}
+.bars>div.key::after{background:var(--accent)}
+.bars span{grid-column:1;color:var(--soft)}
+.bars .key span,.bars .key b{color:var(--fg);font-weight:600}
+.bars b{grid-column:3;text-align:right;font-weight:500;font-variant-numeric:tabular-nums}
+.waffle{display:grid;grid-template-columns:repeat(10,1fr);gap:14px}
+.waffle i{aspect-ratio:1;border-radius:4px;background:var(--off)}
+.waffle i.on{background:var(--accent)}
+.waffle-l{font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-top:18px}
+.bignum{font:400 400px/0.8 var(--display);letter-spacing:-4px}
+/* Tarjetas */
+.cards{display:grid;gap:16px}
+.cards.c3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.cards.c4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.cards.c2{grid-template-columns:1fr 1fr}
+.card{border:1.5px solid var(--line);border-radius:var(--r);padding:38px 36px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card .ol{font:400 84px/0.9 var(--display);color:var(--faint)}
+.card b{font-weight:600;font-size:32px;line-height:1.25}
+.card p,.card span{color:var(--soft);font-size:25px;line-height:1.45}
+.card .oc{margin-top:auto;padding-top:22px;font:400 70px/1 var(--display);color:var(--fg)}
+.card .oc small{font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-left:10px}
+.card .d{font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.card .ic{margin-bottom:10px}
+.kpi{min-height:470px}
+.kpi .k{margin-bottom:26px}
+.kpi .v{font:400 140px/0.86 var(--display)}
+.kpi .l{font-size:25px;margin-top:16px;color:var(--soft)}
+.kpi .dl{margin-top:auto;padding-top:22px;font:500 22px var(--label);color:var(--faint)}
+.kpi .dl em{font-style:normal;color:var(--accent)}
+/* Íconos */
+.ic{width:64px;height:64px;padding:14px;border:1.5px solid var(--line);border-radius:var(--r);stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic.a{color:var(--accent);border-color:var(--accent)}
+.ilist{list-style:none;margin:0;padding:0;display:grid;gap:34px}
+.ilist li{display:grid;grid-template-columns:64px 1fr;gap:28px;align-items:center}
+.ilist b{display:block;font:400 54px/1 var(--display);letter-spacing:.5px}
+.ilist span{display:block;font-size:24px;color:var(--soft);margin-top:6px}
+/* Antes y después */
+.ba{display:grid;grid-template-columns:1fr 120px 1fr;align-items:stretch}
+.ba>div{border:1.5px solid var(--line);border-radius:var(--r);padding:44px 44px 40px;display:flex;flex-direction:column}
+.ba .k{margin-bottom:auto;padding-bottom:40px}
+.ba .v{font:400 220px/0.82 var(--display)}
+.ba .l{font-size:26px;color:var(--soft);margin-top:18px}
+.ba .arrow{border:0;display:grid;place-items:center;font:400 80px var(--display);color:var(--accent);padding:0}
+/* Simulador */
+.sim{display:grid;gap:48px}
+.sim .ctl{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.sim .ctl span{font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.pick{display:inline-flex;border:1.5px solid var(--fg);border-radius:var(--r);overflow:hidden}
+.pick button{all:unset;cursor:pointer;min-width:100px;text-align:center;padding:20px 0;font:500 30px var(--label);color:var(--fg)}
+.pick button+button{border-left:1.5px solid var(--fg)}
+.pick button[aria-pressed=true]{background:var(--fg);color:var(--bg)}
+.read{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:28px}
+.read>div{border-top:1.5px solid var(--line);padding-top:18px}
+.read b{display:block;font:400 130px/0.9 var(--display)}
+.read span{display:block;font-size:23px;color:var(--soft);margin-top:12px}
+.read .key{border-top:3px solid var(--accent)}
+.read .key b{color:var(--accent)}
+.gauge{position:relative;height:6px;background:var(--line)}
+.gauge i{position:absolute;inset:0 auto 0 0;background:var(--fg);transition:width .5s var(--ease)}
+.gauge s{position:absolute;top:-10px;bottom:-10px;width:3px;background:var(--accent)}
+/* Simulador gráfico: medidores que crecen (data-ancho) y piezas que aparecen según la opción (data-en) */
+.medidor{display:grid;grid-template-columns:190px 1fr 250px;align-items:center;gap:28px}
+.medidor>span{font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.medidor .pista{position:relative;height:56px;background:var(--line)}
+.medidor .pista i{position:absolute;inset:0 auto 0 0;width:calc(var(--v,0) * 100%);background:var(--off);transition:width .8s var(--ease)}
+.medidor.key .pista i{background:var(--accent)}
+.medidor .pista s{position:absolute;top:-10px;bottom:-10px;left:calc(var(--m) * 100%);width:3px;background:var(--fg)}
+.medidor b{font:400 104px/1 var(--display);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.medidor.key b{color:var(--accent)}
+.piezas{display:flex;align-items:center;gap:18px;min-height:130px}
+.piezas [hidden]{display:none}
+.piezas img{width:120px;height:120px;object-fit:contain;animation:pop .45s cubic-bezier(.3,1.5,.5,1)}
+.piezas .mas{font:400 60px/1 var(--display);color:var(--faint)}
+/* Imagen real (foto, captura o mapa) */
+.img{width:100%;height:100%;object-fit:cover;display:block}
+.ph{width:100%;height:100%;display:grid;place-items:center;text-align:center;color:var(--faint);font:500 22px var(--label);letter-spacing:.06em;
+  background:repeating-linear-gradient(135deg,transparent 0 22px,var(--line) 22px 24px)}
+
+/* =====================================================================
+   TIPOS DE LÁMINA
+   .portada   título grande a la izquierda y las cifras clave a la derecha
+   .lado      título y texto a la izquierda, evidencia a la derecha
+   .std       título arriba y evidencia a lo ancho (cifras, gráfico, tarjetas)
+   .dato      una cifra enorme con su frase, y su visual al lado
+   .seccion   separador de capítulo (en presentaciones largas)
+   .partida   dos mitades con imagen o color: solo de vez en cuando
+   .cierre    lo que se pide, en grande, para terminar
+   ===================================================================== */
+.portada{display:grid;grid-template-columns:1fr 700px;gap:110px;align-items:end;padding-top:110px;padding-bottom:110px}
+.portada:has(.side){grid-template-columns:1fr 520px;padding-top:150px;padding-bottom:150px}
+.portada h1{font-size:184px;line-height:.86}
+.portada .pic{align-self:stretch;min-height:0;border-radius:var(--r);overflow:hidden;background:var(--muted);border:1.5px solid var(--line)}
+.portada .pic>*{width:100%;height:100%;object-fit:cover}
+.portada .pic>svg,.portada .pic>img,.portada .pic>video{display:block}
+.portada .lead{margin-top:34px;max-width:1000px}
+.portada .k{margin-bottom:30px}
+/* Cifras a la derecha: OPCIONAL (<div class="side">…); sin ellas la portada es título + imagen */
+.portada .side{display:grid;gap:0;border-top:1.5px solid var(--fg)}
+.portada .side div{display:grid;grid-template-columns:auto 1fr;align-items:baseline;gap:24px;padding:22px 0;border-bottom:1px solid var(--line)}
+.portada .side b{font:400 76px/1 var(--display);min-width:190px}
+.portada .side span{font-size:23px;color:var(--soft);line-height:1.3}
+.portada .side div:first-child b{color:var(--accent)}
+.lado{display:grid;grid-template-columns:640px 1fr;gap:100px;align-items:center}
+.lado h2{font-size:96px;line-height:.92}
+.lado .lead{margin-top:30px;font-size:30px}
+.std{display:grid;grid-template-rows:auto 1fr;gap:50px}
+.std .head{display:grid;grid-template-columns:1fr 640px;gap:80px;align-items:end}
+.std h2{font-size:92px;line-height:.92}
+.std .head .lead{font-size:28px}
+.std .sbody{display:flex;flex-direction:column;justify-content:center;min-height:0}
+.dato{display:grid;grid-template-columns:1fr 700px;gap:100px;align-items:center}
+.dato h2{font-size:80px;line-height:.92;margin-top:22px}
+.dato .waffle{grid-template-columns:repeat(5,1fr);gap:18px}
+.seccion{display:grid;grid-template-columns:auto 1fr;gap:80px;align-items:center}
+.seccion .dn{font:400 380px/0.8 var(--display);color:transparent;-webkit-text-stroke:3px var(--accent)}
+.seccion h2{font-size:140px;line-height:.88}
+.seccion .lead{margin-top:26px;max-width:900px}
+.partida{padding:0;display:grid;grid-template-columns:1fr 1fr}
+.partida .half{padding:150px 100px 130px;display:flex;flex-direction:column;justify-content:center;gap:26px;min-width:0}
+.partida .half.media{padding:0}
+.partida h2{font-size:100px;line-height:.9}
+.partida .mbar{left:calc(50% + 100px)}
+.partida .srcl{left:calc(50% + 100px)}
+.cierre{display:grid;grid-template-columns:1fr 760px;gap:100px;align-items:center}
+.cierre h2{font-size:150px;line-height:.86}
+.cierre .ask{border-radius:var(--r);padding:56px 54px;display:grid;gap:22px}
+.cierre .ask .k{color:var(--faint)}
+.cierre .ask b{font:400 72px/0.95 var(--display);letter-spacing:.5px}
+.cierre .ask p{font-size:26px;color:var(--soft);line-height:1.4}
+
+/* Lámina .lado: la evidencia llena la mitad derecha (sin franjas vacías arriba y abajo) */
+.lado .ilist.txt{gap:64px}
+.lado .ilist.txt li{grid-template-columns:84px 1fr;gap:32px}
+.lado .ilist.txt .ic{width:84px;height:84px;padding:20px}
+.lado .ilist.txt b{font-size:36px}
+.lado .ilist.txt span{font-size:29px}
+.lado .bars{gap:60px}
+.lado .bars>div{grid-template-columns:240px 1fr 130px;font-size:32px}
+.lado .bars>div::after{height:100px}
+.lado .sim{gap:84px}
+.lado .read b{font-size:170px}
+.lado .read span{font-size:26px}
+
+/* =====================================================================
+   COMPONENTES GRÁFICOS EXTRA
+   ===================================================================== */
+/* Lista con íconos para texto (resumen, puntos): .ilist.txt */
+.ilist.txt b{font:600 30px/1.3 var(--sans);letter-spacing:0}
+.ilist.txt span{font-size:27px;margin-top:4px}
+.ilist.txt li{align-items:start}
+/* Anillo: <svg class="donut" viewBox="0 0 36 36"><circle class="t" …/><circle class="v" pathLength="100" style="--p:41" …/></svg> */
+.donut{width:92px;height:92px;transform:rotate(-90deg)}
+.donut circle{fill:none;stroke-width:3.4}
+.donut .t{stroke:var(--line)}
+.donut .v{stroke:var(--accent);stroke-dasharray:var(--p) 100;stroke-linecap:butt}
+.card{position:relative}
+.card>.donut{position:absolute;right:26px;top:26px}
+/* Flujo de un proceso: nodos con ícono unidos por líneas que avanzan; .hot marca el cuello de botella */
+.flow{display:grid;grid-template-columns:repeat(var(--n,5),minmax(0,1fr));gap:0;align-items:stretch}
+.flow .node{position:relative;border:1.5px solid var(--line);border-radius:var(--r);padding:34px 26px;display:flex;flex-direction:column;gap:10px;margin-right:56px}
+.flow .node:last-child{margin-right:0}
+.flow .node:not(:last-child)::after{content:"";position:absolute;left:100%;top:50%;width:56px;height:3px;
+  background:repeating-linear-gradient(90deg,var(--off) 0 10px,transparent 10px 18px);background-size:18px 3px}
+.flow .node b{font:400 46px/1 var(--display);letter-spacing:.5px}
+.flow .node span{font-size:22px;color:var(--soft)}
+.flow .node .t{font:400 64px/1 var(--display);margin-top:auto;padding-top:14px}
+.flow .node.hot{border-color:var(--accent);border-width:2.5px}
+.flow .node.hot .t{color:var(--accent)}
+.flow .node.hot::before{content:"Cuello de botella";position:absolute;top:-18px;left:22px;background:var(--bg);padding:0 10px;font:500 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+/* Línea de tiempo sobre tarjetas: <div class="tline" style="--n:3"><span></span>…</div> */
+.tline{position:relative;display:grid;grid-template-columns:repeat(var(--n,3),minmax(0,1fr));gap:16px;height:30px;margin-bottom:26px}
+.tline::before,.tline::after{content:"";position:absolute;left:0;right:0;top:14px;height:2px;background:var(--line)}
+.tline::after{background:var(--accent);transform-origin:left}
+.tline span{position:relative;z-index:1;width:30px;height:30px;border-radius:50%;background:var(--bg);border:2.5px solid var(--accent);margin-left:36px}
+
+/* =====================================================================
+   COMPONENTES NUEVOS (todo con variables; los datos van en el HTML)
+   ===================================================================== */
+/* Círculos: contenido centrado de verdad. Un hueco alto/bajo de la fuente se compensa con padding; las reglas
+   de tarjeta (.card b, .card span, márgenes) no los empujan. */
+.avatar,.circulo{--d:96px;width:var(--d);height:var(--d);flex:none;border-radius:50%;box-sizing:border-box;margin:0;padding:0;overflow:hidden;
+  display:grid;place-content:center;justify-items:center;text-align:center}
+.avatar>*,.circulo>*{margin:0!important}
+.avatar{background:var(--off);color:var(--fg);font:600 calc(var(--d) * .38)/1 var(--sans);letter-spacing:.02em}
+.avatar.a{background:var(--accent);color:var(--bg)}
+.avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.avatar .ic,.circulo .ic{width:calc(var(--d) * .46);height:calc(var(--d) * .46);padding:0;border:0}
+.card .avatar{font-size:calc(var(--d) * .38);line-height:1;color:var(--fg)}
+.card .avatar.a{color:var(--bg)}
+.circulo{--d:210px;border:2px solid var(--line);gap:2px}
+.circulo.a{border-color:var(--accent)}
+.circulo b{display:block;font:400 calc(var(--d) * .36)/1 var(--display);letter-spacing:0}
+.circulo b:only-child{padding-top:.1em}
+.circulo span{display:block;font-size:22px;line-height:1.15;color:var(--soft);max-width:calc(var(--d) * .8)}
+.circulo.a b{color:var(--accent)}
+/* Organigrama / árbol con líneas: <ul class="arbol"><li><div class="nodo"><b>…</b><span>…</span></div><ul><li>…</li></ul></li></ul>
+   Mismo alto en todos los nodos (--h). Úsalo solo si la jerarquía es real: arriba se lee como jefatura. */
+.arbol{--h:104px;--v:34px;--lw:2px;--lc:var(--off)}
+.arbol,.arbol ul{list-style:none;margin:0;padding:0;display:flex;justify-content:center;position:relative}
+.arbol ul{padding-top:var(--v)}
+.arbol ul::before{content:"";position:absolute;top:0;left:50%;height:var(--v);border-left:var(--lw) solid var(--lc)}
+.arbol li{list-style:none;position:relative;flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;padding:var(--v) 10px 0}
+.arbol>li{padding-top:0}
+.arbol ul>li::before,.arbol ul>li::after{content:"";position:absolute;top:0;width:50%;height:var(--v);border-top:var(--lw) solid var(--lc)}
+.arbol ul>li::before{right:50%}
+.arbol ul>li::after{left:50%;border-left:var(--lw) solid var(--lc)}
+.arbol ul>li:only-child::before,.arbol ul>li:only-child::after{display:none}
+.arbol ul>li:only-child{padding-top:0}
+.arbol ul>li:first-child::before,.arbol ul>li:last-child::after{border:0}
+.arbol ul>li:last-child::before{border-right:var(--lw) solid var(--lc)}
+.arbol .nodo{width:100%;max-width:300px;height:var(--h);border:1.5px solid var(--line);border-radius:var(--r);padding:12px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center;background:var(--bg)}
+.arbol .nodo b{font:600 26px/1.15 var(--sans)}
+.arbol .nodo span{font-size:22px;line-height:1.2;color:var(--soft)}
+.arbol .nodo.inv{border-color:var(--fg)}
+.arbol .nodo.hot{border-color:var(--accent);border-width:2.5px}
+/* Variantes de tarjeta: .card.foto (imagen arriba), .card.icono (ícono grande), .card.numerada (data-n),
+   .cards.libre (sin caja, solo filete); la invertida es .card.inv */
+.ic.g{width:112px;height:112px;padding:26px}
+.card.foto{padding:0;gap:0;overflow:hidden}
+.card.foto .cf{height:var(--hf,230px);flex:none;background:var(--muted)}
+.card.foto .cf>*{width:100%;height:100%;object-fit:cover}
+.card.foto .cf>img,.card.foto .cf>video{display:block}
+.card.foto .cf+*{margin-top:24px}
+.card.foto>:not(.cf){margin-left:34px;margin-right:34px}
+.card.foto>:last-child{margin-bottom:30px}
+.card.icono{align-items:flex-start;gap:14px}
+.card.icono .ic.g{margin-bottom:12px}
+.card.numerada::before{content:attr(data-n);font:400 110px/.85 var(--display);color:var(--accent);margin-bottom:10px}
+.cards.libre .card{border:0;border-top:1.5px solid var(--fg);border-radius:0;padding:26px 0 0}
+/* Prioridad: <span class="prio alta">Alta</span> (alta, media, baja) */
+.prio{--pc:var(--faint);display:inline-flex;align-items:center;gap:10px;font:600 22px/1 var(--label);letter-spacing:.06em;text-transform:uppercase;
+  padding:8px 16px;border:1.5px solid var(--pc);border-radius:var(--r);background:color-mix(in oklab,var(--pc) 14%,transparent);color:var(--fg);vertical-align:middle;white-space:nowrap}
+.prio::before{content:"";width:12px;height:12px;border-radius:50%;background:var(--pc);flex:none}
+.prio.alta{--pc:oklch(.66 .21 27)}.prio.media{--pc:oklch(.8 .16 85)}.prio.baja{--pc:oklch(.7 .15 150)}
+[data-theme=light] .prio.media{--pc:oklch(.7 .16 70)}
+/* Pasos que se marcan (se recuerdan en este navegador) con barra de avance: <ul class="pasos-check" data-clave="plan">…</ul> */
+.pasos-check{list-style:none;margin:0;padding:0}
+.pasos-check li{border-bottom:1px solid var(--line)}
+.pasos-check label{display:flex;align-items:center;gap:22px;padding:18px 0;font-size:28px;line-height:1.3;cursor:pointer}
+.pasos-check .pc-t{flex:1;min-width:0;transition:color .25s}
+.pasos-check input{appearance:none;-webkit-appearance:none;flex:none;width:36px;height:36px;margin:0;border:2px solid var(--fg);border-radius:var(--r);background:transparent;cursor:pointer;display:grid;place-content:center}
+.pasos-check input::after{content:"";width:18px;height:10px;border-left:4px solid var(--bg);border-bottom:4px solid var(--bg);transform:translateY(-2px) rotate(-45deg) scale(0);transition:transform .2s var(--ease)}
+.pasos-check input:checked{background:var(--accent);border-color:var(--accent)}
+.pasos-check input:checked::after{transform:translateY(-2px) rotate(-45deg) scale(1)}
+.pasos-check input:checked+.pc-t{color:var(--faint);text-decoration:line-through;text-decoration-thickness:2px}
+.pasos-check input:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.pc-avance{display:flex;align-items:center;gap:22px;margin-top:22px;font:500 22px var(--label);letter-spacing:.04em;color:var(--soft)}
+.pc-barra{flex:1;height:8px;background:var(--line);position:relative}
+.pc-barra i{position:absolute;inset:0 auto 0 0;width:calc(var(--p,0) * 100%);background:var(--accent);transition:width .45s var(--ease)}
+/* Línea que avanza: <div class="linea-flujo"></div> (.v vertical) o <path class="linea-flujo"> en un SVG.
+   El desplazamiento de la animación es EXACTAMENTE un período (--on + --off): el bucle no se corta. */
+.linea-flujo{--on:12px;--off:12px;--g:3px;display:block;height:var(--g);background:repeating-linear-gradient(90deg,var(--accent) 0 var(--on),transparent var(--on) calc(var(--on) + var(--off)));background-size:calc(var(--on) + var(--off)) 100%}
+.linea-flujo.v{height:auto;width:var(--g);background:repeating-linear-gradient(180deg,var(--accent) 0 var(--on),transparent var(--on) calc(var(--on) + var(--off)));background-size:100% calc(var(--on) + var(--off))}
+path.linea-flujo,line.linea-flujo,polyline.linea-flujo{fill:none;background:none;height:auto;stroke:var(--accent);stroke-width:3;stroke-linecap:butt;stroke-dasharray:var(--on) var(--off)}
+/* Carta Gantt desde datos: <div class="gantt" data-ini="2026-11-02" data-fin="2027-01-04" data-hoy="2026-11-16"> filas .gt-fila con
+   .gt-nom y .gt-pista; piezas: <i data-a data-b> barra, <i class="cont"> continua, <u data-a> hito. Sin fechas: data-cols="Fase 1,Fase 2…"
+   y números de columna en data-a/data-b/data-hoy. Lo que queda después de "hoy" se dibuja rayado y con la etiqueta Tentativo. */
+.gantt{position:relative;--nom:330px;--c:var(--accent);--fila:76px;--cab:88px;margin-bottom:64px}
+.gantt.sf{--cab:46px}
+.gt-cab{margin-left:var(--nom);position:relative;height:var(--cab);border-bottom:1.5px solid var(--fg)}
+.gt-meses,.gt-semanas{position:absolute;left:0;right:0}
+.gt-meses{top:0;height:42px}
+.gt-meses span{position:absolute;top:0;height:42px;line-height:42px;padding-left:12px;border-left:2px solid var(--fg);font:500 22px var(--label);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.gt-semanas{top:46px;height:38px}
+.gt-semanas span{position:absolute;top:0;transform:translateX(-50%);font:400 22px var(--label);color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
+.gt-fila{display:grid;grid-template-columns:var(--nom) 1fr;align-items:center;height:var(--fila);border-bottom:1px solid var(--line)}
+.gt-nom{font:500 26px/1.2 var(--sans);padding-right:20px}
+.gt-pista{position:relative;height:var(--fila)}
+.gt-pista i{position:absolute;top:calc(var(--fila) / 2 - 18px);height:36px;min-width:18px;border-radius:var(--r);
+  background:linear-gradient(90deg,var(--c) 0 var(--cut,100%),transparent var(--cut,100%)),repeating-linear-gradient(135deg,color-mix(in oklab,var(--c) 50%,transparent) 0 7px,transparent 7px 14px);
+  box-shadow:inset 0 0 0 2px var(--c);transform-origin:left}
+.gt-pista i.neutra{--c:var(--faint)}
+.gt-pista i.cont{--per:24px;top:calc(var(--fila) / 2 - 5px);height:10px;border-radius:0;box-shadow:none;background:repeating-linear-gradient(90deg,var(--c) 0 14px,transparent 14px var(--per));background-size:var(--per) 100%}
+.gt-pista u{position:absolute;top:calc(var(--fila) / 2 - 15px);width:30px;height:30px;margin-left:-15px;transform:rotate(45deg);background:var(--c);text-decoration:none;border-radius:4px}
+.gt-pista u.fut{background:var(--bg);box-shadow:inset 0 0 0 3px var(--c)}
+.gt-capa{position:absolute;left:var(--nom);right:0;top:0;bottom:0;pointer-events:none}
+.gt-capa.alta{z-index:4}
+.gt-reja i{position:absolute;top:var(--cab);bottom:0;border-left:1px dashed var(--line)}
+.gt-futuro{position:absolute;top:var(--cab);bottom:0;right:0;background:repeating-linear-gradient(135deg,color-mix(in oklab,var(--fg) 7%,transparent) 0 12px,transparent 12px 24px)}
+.gt-futuro span{position:absolute;bottom:-52px;left:84px;white-space:nowrap;font:500 22px var(--label);letter-spacing:.06em;text-transform:uppercase;color:var(--soft);padding:2px 12px;border:1.5px dashed var(--off);border-radius:var(--r)}
+.gt-hoy{position:absolute;top:calc(var(--cab) / 2);bottom:0;width:0;border-left:3px solid var(--accent)}
+.gt-hoy span{position:absolute;bottom:-52px;left:0;transform:translateX(-50%);padding:2px 16px;font:600 22px var(--label);letter-spacing:.06em;text-transform:uppercase;color:var(--bg);background:var(--accent);border-radius:var(--r)}
+/* Demo en vivo: transición antes de mostrar la plataforma, con marco de notebook. Hijos: .dm-t (texto) y .dm-nb (notebook) */
+.demo{display:grid;grid-template-columns:660px 1fr;gap:90px;align-items:center}
+.demo .dm-t h2{font-size:120px;line-height:.88;margin-top:26px}
+.demo .dm-t .lead{margin-top:30px}
+.dm-vivo{display:inline-flex;align-items:center;gap:14px;font:600 22px var(--label);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.dm-vivo::before{content:"";width:16px;height:16px;border-radius:50%;background:var(--accent)}
+.dm-nb{justify-self:center;width:100%;max-width:960px}
+.dm-nb .pant{aspect-ratio:16/10;border:16px solid var(--fg);border-bottom-width:20px;border-radius:26px 26px 4px 4px;background:var(--muted);overflow:hidden;position:relative}
+.dm-nb .pant>*{width:100%;height:100%;object-fit:cover}
+.dm-nb .pant>img,.dm-nb .pant>video{display:block}
+.dm-nb .base{position:relative;height:26px;margin:0 -64px;background:var(--fg);border-radius:0 0 34px 34px;opacity:.88}
+.dm-nb .base::before{content:"";position:absolute;left:50%;top:0;width:190px;height:10px;margin-left:-95px;background:var(--bg);opacity:.35;border-radius:0 0 10px 10px}
+/* Despedida mínima: una palabra y, si hace falta, un dato de contacto */
+.despedida{display:grid;align-content:center;gap:34px}
+.despedida::before{content:"";width:120px;height:6px;background:var(--accent)}
+.despedida h2{font-size:260px;line-height:.82}
+.despedida p{font-size:34px;color:var(--soft)}
+/* Video en lámina (data-avance-fin, data-tramo): leyenda del tramo */
+.vcap{margin-top:18px;font-size:26px;line-height:1.3;color:var(--soft);min-height:1.3em}
+
+/* =====================================================================
+   ANIMACIÓN (las presentaciones van siempre animadas)
+   Al entrar cada lámina: los elementos suben en cascada, los gráficos se
+   dibujan, las barras crecen, los pictogramas aparecen uno a uno, las
+   cifras cuentan desde cero y los flujos avanzan. Lo arma el motor solo.
+   Sin animación con ?estatico (capturas, PDF) ni con movimiento reducido.
+   ===================================================================== */
+.bars>div::after{transform-origin:left}
+@media (prefers-reduced-motion:no-preference){
+  :root:not(.estatico) .slide.on .an{animation:rise .8s var(--ease) both;animation-delay:calc(var(--d,0) * 90ms + 140ms)}
+  :root:not(.estatico) .slide.on .bars>div::after{animation:growx 1.1s var(--ease) both;animation-delay:calc(var(--d,0) * 150ms + 550ms)}
+  :root:not(.estatico) .slide.on .waffle i{animation:pop .55s cubic-bezier(.3,1.5,.5,1) both;animation-delay:calc(var(--d,0) * 75ms + 400ms)}
+  :root:not(.estatico) .slide.on .chart .ln-key{stroke-dasharray:1;stroke-dashoffset:1;animation:draw 1.9s var(--ease) .5s forwards}
+  :root:not(.estatico) .slide.on .chart .ln-off{animation:fade .9s .3s both}
+  :root:not(.estatico) .slide.on .chart .dot,:root:not(.estatico) .slide.on .chart .note,:root:not(.estatico) .slide.on .chart .lab-key{animation:fade .6s 2.1s both}
+  :root:not(.estatico) .slide.on .donut .v{animation:ring 1.5s var(--ease) .6s both}
+  :root:not(.estatico) .slide.on .tline::after{animation:growx 1.8s var(--ease) .5s both}
+  :root:not(.estatico) .slide.on .tline span{animation:pop .5s cubic-bezier(.3,1.5,.5,1) both;animation-delay:calc(var(--d,0) * 450ms + 500ms)}
+  :root:not(.estatico) .slide.on .flow .node:not(:last-child)::after{animation:march .9s linear infinite}
+  :root:not(.estatico) .slide.on .flow .node.hot{animation:pulse 2.4s ease-in-out 1.6s infinite}
+  :root:not(.estatico) .slide.on .ba .arrow{animation:nudge 1.8s ease-in-out 1s infinite}
+  :root:not(.estatico) .slide.on .media>*{animation:kb 14s ease-out both}
+  :root:not(.estatico) .slide.on .dn{animation:rise 1s var(--ease) both}
+  :root:not(.estatico) .slide.on .gt-pista i:not(.cont){animation:growx 1s var(--ease) both;animation-delay:calc(var(--d,0) * 130ms + 500ms)}
+  :root:not(.estatico) .slide.on .gt-pista i.cont{animation:marcha 1s linear infinite}
+  :root:not(.estatico) .slide.on .gt-pista u{animation:pop .5s cubic-bezier(.3,1.5,.5,1) both;animation-delay:calc(var(--d,0) * 130ms + 900ms)}
+  :root:not(.estatico) .slide.on .gt-hoy{animation:fade .6s 1.2s both}
+  :root:not(.estatico) .slide.on .linea-flujo:not(path):not(.v){animation:marcha 1s linear infinite}
+  :root:not(.estatico) .slide.on .linea-flujo.v{animation:marcha-v 1s linear infinite}
+  :root:not(.estatico) .slide.on path.linea-flujo,:root:not(.estatico) .slide.on line.linea-flujo{animation:marcha-svg 1s linear infinite}
+  :root:not(.estatico) .slide.on .dm-vivo::before{animation:pulse 2s ease-in-out infinite}
+}
+@keyframes rise{from{opacity:0;transform:translateY(30px)}}
+@keyframes growx{from{transform:scaleX(0)}}
+@keyframes pop{from{opacity:0;transform:scale(.3)}}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes fade{from{opacity:0}}
+@keyframes ring{from{stroke-dasharray:0 100}}
+@keyframes march{to{background-position:18px 0}}
+@keyframes marcha{to{background-position:var(--per,calc(var(--on,12px) + var(--off,12px))) 0}}
+@keyframes marcha-v{to{background-position:0 calc(var(--on,12px) + var(--off,12px))}}
+@keyframes marcha-svg{to{stroke-dashoffset:calc((var(--on,12px) + var(--off,12px)) * -1)}}
+@keyframes nudge{50%{transform:translateX(14px)}}
+@keyframes pulse{50%{box-shadow:0 0 0 10px color-mix(in oklab,var(--accent) 18%,transparent)}}
+@keyframes kb{from{transform:scale(1.12)}to{transform:scale(1)}}
+
+/* Índice lateral: oculto por defecto. data-rail="on" en .stage lo muestra; también se prende desde el panel de opciones.
+   Vive en el margen izquierdo (los 130 px que ya existen): no le quita ancho al contenido.
+   Una raya y un número por sección; el nombre de la sección ya está en el marco de arriba. */
+.rail-s{display:none}
+.with-rail .rail-s{display:flex;position:absolute;left:44px;top:0;bottom:0;flex-direction:column;justify-content:center;gap:18px;z-index:2}
+.rail-s span{display:flex;align-items:center;gap:10px;font:500 22px var(--label);color:var(--faint);letter-spacing:.04em}
+.rail-s span::before{content:"";flex:none;width:12px;height:2px;background:var(--off)}
+.rail-s span.on{color:var(--fg)}
+.rail-s span.on::before{width:22px;background:var(--accent)}
+
+/* =====================================================================
+   GUÍA: narrador, resaltados, barra de progreso y panel de opciones.
+   Funciona en cualquier deck. El narrador (voz y subtítulos) existe solo si
+   el deck trae <script id="narracion"> (lo genera scripts/narrar.py) y parte
+   apagado. Paneles y controles van fuera del lienzo, en claro sobre negro.
+   ===================================================================== */
+.voz{display:none}
+.nar-ui{--accent:oklch(.82 .15 var(--hue));--ui:#f1f1f1;--ui2:rgba(255,255,255,.62);--ui3:rgba(255,255,255,.4);font-family:var(--sans)}
+.con-guia .ui{display:none}
+.con-guia .rotate{bottom:auto;top:14px}
+/* Resaltados: marco que viaja, agrandar, luz y subrayado; el resto se atenúa */
+.nar-ring{position:absolute;z-index:4;pointer-events:none;border:3px solid var(--accent);border-radius:12px;opacity:0;
+  box-shadow:0 0 0 1px color-mix(in oklab,var(--accent) 30%,transparent),0 0 60px color-mix(in oklab,var(--accent) 22%,transparent);
+  transition:left .7s var(--ease),top .7s var(--ease),width .7s var(--ease),height .7s var(--ease),opacity .35s}
+.nar-ring.on{opacity:1}
+.nar-ring.llega{animation:nar-llega .7s var(--ease)}
+@keyframes nar-llega{40%{box-shadow:0 0 0 14px color-mix(in oklab,var(--accent) 16%,transparent),0 0 80px color-mix(in oklab,var(--accent) 30%,transparent)}}
+.nar-line{position:absolute;z-index:4;pointer-events:none;height:6px;background:var(--accent);border-radius:3px;transform:scaleX(0);transform-origin:left;opacity:0;
+  transition:transform .8s var(--ease),opacity .3s}
+.nar-line.on{transform:scaleX(1);opacity:1}
+.nar-dim{filter:opacity(.3) saturate(.5)}
+.nar-zoom{scale:1.07;position:relative;z-index:3;box-shadow:0 24px 70px rgba(0,0,0,.5),0 0 0 2px var(--accent),0 0 80px color-mix(in oklab,var(--accent) 28%,transparent)}
+.nar-luz{filter:brightness(1.12)}
+.nar-dim,.nar-zoom,.nar-luz,.nar-suelta{transition:filter .55s var(--ease),scale .6s var(--ease),box-shadow .6s var(--ease),opacity .45s var(--ease),transform .45s var(--ease)}
+/* Línea de tiempo: con el narrador o los resaltados avanza hito por hito */
+.nar-tl .tline::after{animation:none!important;transform:scaleX(var(--tl,0));transition:transform 1s var(--ease)}
+.nar-tl .tline span{animation:none!important;opacity:0;transform:scale(.3);transition:opacity .4s,transform .5s cubic-bezier(.3,1.5,.5,1)}
+.nar-tl .tline span.ok{opacity:1;transform:none}
+/* Barra fina de la presentación: un tramo por lámina, más largo cuantos más pasos tiene */
+.nar-barra{position:fixed;z-index:18;height:24px;display:none;align-items:flex-end;cursor:pointer}
+.ver-ctl-pres .nar-barra{display:flex}
+.nar-tramos{display:flex;gap:3px;width:100%;height:4px;transition:height .25s var(--ease)}
+.nar-barra:hover .nar-tramos{height:6px}
+.nar-tramos i{position:relative;flex:var(--w) 1 0;min-width:0;background:color-mix(in oklab,var(--fg) 22%,transparent);overflow:hidden;transition:flex-grow .35s var(--ease),background .2s}
+.nar-tramos i.h{flex-grow:calc(var(--w) * 1.6 + .6);background:color-mix(in oklab,var(--fg) 38%,transparent)}
+.nar-tramos i b{position:absolute;inset:0 auto 0 0;width:var(--p,0%);background:var(--accent);transition:width .35s var(--ease)}
+.nar-prev{position:fixed;z-index:19;width:288px;pointer-events:none;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .25s var(--ease)}
+.nar-prev.on{opacity:1;transform:none}
+.nar-prev-c{position:relative;width:288px;height:162px;overflow:hidden;border-radius:6px;border:1px solid rgba(255,255,255,.28);box-shadow:0 18px 50px rgba(0,0,0,.55);background:var(--bg)}
+.nar-prev-l{position:absolute;left:0;top:0;width:1920px;height:1080px;transform:scale(.15);transform-origin:0 0}
+.nar-prev-l .slide,.nar-prev-l .slide *{animation:none!important;transition:none!important}
+.nar-prev-t{display:block;margin-top:8px;font:500 12px var(--mono);letter-spacing:.06em;color:#fff;text-shadow:0 1px 6px #000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Controles del narrador (barra tipo video, abajo) */
+.nar-ctl{position:fixed;left:0;right:0;bottom:0;z-index:20;padding:44px 22px 14px;display:none;gap:8px;color:var(--ui);
+  background:linear-gradient(transparent,rgba(0,0,0,.8) 55%);font:500 13px var(--mono);transition:opacity .45s,transform .45s var(--ease)}
+.ver-ctl-narr .nar-ctl{display:grid}
+.ver-ctl-narr:not(.quieto) .num,.ver-ctl-narr:not(.quieto) .srcl{visibility:hidden} /* la barra del narrador los tapa */
+.quieto .nar-ctl{opacity:0;transform:translateY(14px);pointer-events:none}
+.quieto,.quieto *{cursor:none!important}
+.nar-prog{display:flex;gap:3px;height:14px;align-items:center;cursor:pointer}
+.nar-prog i{position:relative;flex:var(--w) 1 0;height:4px;background:rgba(255,255,255,.22);border-radius:2px;overflow:hidden;transition:height .2s}
+.nar-prog i b{position:absolute;inset:0 auto 0 0;width:var(--p,0%);background:var(--accent)}
+.nar-row{display:flex;align-items:center;gap:4px;min-width:0}
+.nar-ui button{font:inherit;color:inherit}
+.nar-row button{all:unset;cursor:pointer;height:40px;min-width:40px;padding:0 8px;box-sizing:border-box;display:grid;place-items:center;border-radius:4px;letter-spacing:.06em}
+.nar-row button:hover,.nar-row button:focus-visible{background:rgba(255,255,255,.12)}
+.nar-row button[aria-pressed=false]{color:var(--ui3)}
+.nar-ui svg{width:20px;height:20px;fill:currentColor}
+.nar-t{padding:0 10px;color:var(--ui2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.nar-tit{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ui3);letter-spacing:.08em;text-transform:uppercase;font-size:12px}
+/* Subtítulos del narrador: la frase actual; cada palabra se enciende al decirse */
+.nar-sub{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);width:max-content;max-width:min(1100px,90vw);text-align:center;z-index:19;pointer-events:none;display:none;
+  font:500 clamp(15px,1.5vw,24px)/1.45 var(--sans);color:#fff;transition:bottom .45s var(--ease),opacity .3s}
+.narrando .nar-sub{display:block}
+.nar-sub span{background:rgba(0,0,0,.76);padding:.18em .55em;border-radius:4px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.nar-sub s{text-decoration:none;opacity:.5;transition:opacity .18s}
+.nar-sub s.y{opacity:1}
+.quieto .nar-sub,.narrando:not(.ver-ctl-narr) .nar-sub{bottom:26px}
+.sin-subs .nar-sub{opacity:0}
+/* Rueda de opciones (arriba a la derecha) y panel que entra desde la orilla derecha */
+.nar-rueda{all:unset;position:fixed;top:14px;right:14px;z-index:27;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;cursor:pointer;
+  background:rgba(14,14,14,.86);border:1px solid rgba(255,255,255,.2);color:var(--ui);opacity:0;pointer-events:none;transition:opacity .35s,transform .6s var(--ease)}
+.nar-rueda svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ver-rueda .nar-rueda,.fijar-rueda .nar-rueda,.panel-on .nar-rueda{opacity:1;pointer-events:auto}
+.panel-on .nar-rueda{transform:rotate(75deg)}
+.nar-orilla{position:fixed;top:0;right:0;bottom:0;width:18px;z-index:24}
+.nar-panel{position:fixed;top:0;right:0;bottom:0;z-index:26;width:min(340px,88vw);background:#121212;color:var(--ui);border-left:1px solid rgba(255,255,255,.12);
+  transform:translateX(102%);transition:transform .45s var(--ease);overflow-y:auto;overscroll-behavior:contain;padding:74px 18px 28px;font-size:14px;line-height:1.4}
+.panel-on .nar-panel{transform:none;box-shadow:-30px 0 80px rgba(0,0,0,.45)}
+.nar-panel h3{font:500 11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ui3);margin:20px 4px 6px;padding-top:16px;border-top:1px solid rgba(255,255,255,.1)}
+.nar-panel h3:first-of-type{border:0;padding-top:0;margin-top:0}
+.nar-op{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 8px;border-radius:4px;cursor:pointer}
+.nar-op:hover,.nar-op:focus-visible{background:rgba(255,255,255,.07)}
+.nar-op[aria-disabled=true]{opacity:.42;cursor:not-allowed}
+.nar-op[aria-disabled=true]:hover{background:none}
+.nar-op small{display:block;color:var(--ui3);font-size:12px;margin-top:2px}
+.nar-op small:empty{display:none}
+.nar-ui kbd{font:500 11px var(--mono);color:var(--ui3);border:1px solid rgba(255,255,255,.2);border-radius:3px;padding:1px 5px;margin-left:6px;white-space:nowrap}
+.nar-sw{flex:none;width:34px;height:20px;border-radius:10px;background:rgba(255,255,255,.18);position:relative;transition:background .25s}
+.nar-sw::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .25s var(--ease)}
+.nar-op[aria-checked=true] .nar-sw{background:var(--accent)}
+.nar-op[aria-checked=true] .nar-sw::after{transform:translateX(14px)}
+.nar-colores{display:flex;flex-wrap:wrap;gap:10px;padding:2px 8px 10px}
+.nar-colores button{all:unset;cursor:pointer;width:26px;height:26px;border-radius:50%;background:oklch(.74 .15 var(--h));box-shadow:0 0 0 2px #121212,0 0 0 3px rgba(255,255,255,.15)}
+.nar-colores button[aria-pressed=true]{box-shadow:0 0 0 2px #121212,0 0 0 4px #fff}
+.nar-keys{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;padding:4px 8px;color:var(--ui2);font-size:13px}
+.nar-keys kbd{margin:0;justify-self:start}
+@media (max-width:600px){
+  .nar-ctl{padding:36px 10px 10px}.nar-tit,.nar-abre{display:none}.nar-t{padding:0 4px;font-size:12px}.nar-row button{min-width:36px;padding:0 5px}
+  .nar-sub{bottom:88px;max-width:94vw}
+}
+@media (hover:none){.nar-rueda{opacity:.8;pointer-events:auto}.nar-prev{display:none}}
+@media (prefers-reduced-motion:reduce){.nar-ring,.nar-line{transition:opacity .2s}.nar-zoom{scale:1}}
+@media print{.nar-ui,.nar-ring,.nar-line,.nar-barra,.nar-prev{display:none!important}}
+</style>
+<link rel="stylesheet" href="marca-dp/dp.css">
+</head>
+<body>
+<!-- Íconos (trazo). Uso: <svg class="ic"><use href="#i-reloj"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-reloj" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-alerta" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-sube" viewBox="0 0 24 24"><path d="M3 17 9 11l4 4 8-8"/><path d="M15 7h6v6"/></symbol>
+  <symbol id="i-personas" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6 6 0 0 1 3.5 5.5"/></symbol>
+  <symbol id="i-dinero" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="1.5"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9.5v5M18 9.5v5"/></symbol>
+  <symbol id="i-ruta" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/></symbol>
+  <symbol id="i-dato" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="d-account_balance" viewBox="0 -960 960 960"><path d="M208-254v-319.33h66.67V-254H208Zm241.33 0v-319.33H516V-254h-66.67ZM80-120.67v-66.66h800v66.66H80ZM685.33-254v-319.33H752V-254h-66.67ZM80-640v-62l400-218.67L880-702v62H80Zm148.67-66.67h502.66-502.66Zm0 0h502.66L480-844.67l-251.33 138Z"/></symbol>
+  <symbol id="d-account_tree" viewBox="0 -960 960 960"><path d="M600-120v-120H440v-400h-80v120H80v-320h280v120h240v-120h280v320H600v-120h-80v320h80v-120h280v320H600ZM160-760v160-160Zm520 400v160-160Zm0-400v160-160Zm0 160h120v-160H680v160Zm0 400h120v-160H680v160ZM160-600h120v-160H160v160Z"/></symbol>
+  <symbol id="d-autorenew" viewBox="0 -960 960 960"><path d="M198.67-326.67Q178-363.33 169-401t-9-77q0-132 94-226.33 94-94.34 226-94.34h31l-74.67-74.66L481-918l152.67 152.67L481-612.67 435.67-658l74-74H480q-104.67 0-179 74.5T226.67-478q0 28 5.66 53.67 5.67 25.66 15 49l-48.66 48.66ZM477.67-40 325-192.67l152.67-152.66 44.66 44.66L447.67-226H480q104.67 0 179-74.5T733.33-480q0-28-5.33-53.67-5.33-25.66-16-49l48.67-48.66q20.66 36.66 30 74.33 9.33 37.67 9.33 77 0 132-94 226.33-94 94.34-226 94.34h-32.33l74.66 74.66L477.67-40Z"/></symbol>
+  <symbol id="d-calendar_month" viewBox="0 -960 960 960"><path d="M186.67-80q-27 0-46.84-19.83Q120-119.67 120-146.67v-600q0-27 19.83-46.83 19.84-19.83 46.84-19.83h56.66V-880h70v66.67h333.34V-880h70v66.67h56.66q27 0 46.84 19.83Q840-773.67 840-746.67v600q0 27-19.83 46.84Q800.33-80 773.33-80H186.67Zm0-66.67h586.66v-420H186.67v420Zm0-486.66h586.66v-113.34H186.67v113.34Zm0 0v-113.34 113.34ZM480-400q-17 0-28.5-11.5T440-440q0-17 11.5-28.5T480-480q17 0 28.5 11.5T520-440q0 17-11.5 28.5T480-400Zm-188.5-11.5Q280-423 280-440t11.5-28.5Q303-480 320-480t28.5 11.5Q360-457 360-440t-11.5 28.5Q337-400 320-400t-28.5-11.5ZM640-400q-17 0-28.5-11.5T600-440q0-17 11.5-28.5T640-480q17 0 28.5 11.5T680-440q0 17-11.5 28.5T640-400ZM480-240q-17 0-28.5-11.5T440-280q0-17 11.5-28.5T480-320q17 0 28.5 11.5T520-280q0 17-11.5 28.5T480-240Zm-188.5-11.5Q280-263 280-280t11.5-28.5Q303-320 320-320t28.5 11.5Q360-297 360-280t-11.5 28.5Q337-240 320-240t-28.5-11.5ZM640-240q-17 0-28.5-11.5T600-280q0-17 11.5-28.5T640-320q17 0 28.5 11.5T680-280q0 17-11.5 28.5T640-240Z"/></symbol>
+  <symbol id="d-campaign" viewBox="0 -960 960 960"><path d="M726.67-446.67v-66.66H880v66.66H726.67ZM776-160l-123.33-92 40-53.33 123.33 92L776-160Zm-81.33-495.33-40-53.34L776-800l40 53.33-121.33 91.34ZM206.67-200v-160h-60q-27.5 0-47.09-19.58Q80-399.17 80-426.67v-106.66q0-27.5 19.58-47.09Q119.17-600 146.67-600H320l200-120v480L320-360h-46.67v160h-66.66Zm246.66-158v-244L338-533.33H146.67v106.66H338L453.33-358ZM560-346v-268q27 24 43.5 58.5T620-480q0 41-16.5 75.5T560-346ZM300-480Z"/></symbol>
+  <symbol id="d-check_circle" viewBox="0 -960 960 960"><path d="M422-297.33 704.67-580l-49.34-48.67L422-395.33l-118-118-48.67 48.66L422-297.33ZM480-80q-82.33 0-155.33-31.5-73-31.5-127.34-85.83Q143-251.67 111.5-324.67T80-480q0-83 31.5-156t85.83-127q54.34-54 127.34-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 82.33-31.5 155.33-31.5 73-85.5 127.34Q709-143 636-111.5T480-80Zm0-66.67q139.33 0 236.33-97.33t97-236q0-139.33-97-236.33t-236.33-97q-138.67 0-236 97-97.33 97-97.33 236.33 0 138.67 97.33 236 97.33 97.33 236 97.33ZM480-480Z"/></symbol>
+  <symbol id="d-construction" viewBox="0 -960 960 960"><path d="M764-120 523.67-360.33l66-66L830-186l-66 66Zm-571.33 0-66-66L412-471.33l-94-94-24.67 24.66L247-587v84l-25.33 25.33L100-599.33l25.33-25.34H210l-48.67-48.66L296-808q18-18 39-25t45-7q24 0 45 8.67 21 8.66 39 26.66l-102 102L410.67-654l-25.34 25.33 92 92L588.67-648q-6.67-12.33-10.5-27.67-3.84-15.33-3.84-32 0-55 39.17-94.16Q652.67-841 707.67-841q15 0 26.5 3t20.83 8.33L665.33-740l74 74L829-755.67q5.67 10 8.83 22.17 3.17 12.17 3.17 27.17 0 55-39.17 94.16Q762.67-573 707.67-573q-16 0-28.67-2.33-12.67-2.34-23.67-7.34L192.67-120Z"/></symbol>
+  <symbol id="d-dashboard" viewBox="0 -960 960 960"><path d="M513.33-580v-260H840v260H513.33ZM120-446.67V-840h326.67v393.33H120ZM513.33-120v-393.33H840V-120H513.33ZM120-120v-260h326.67v260H120Zm66.67-393.33H380v-260H186.67v260ZM580-186.67h193.33v-260H580v260Zm0-460h193.33v-126.66H580v126.66Zm-393.33 460H380v-126.66H186.67v126.66ZM380-513.33Zm200-133.34Zm0 200ZM380-313.33Z"/></symbol>
+  <symbol id="d-database_search" viewBox="0 -960 960 960"><path d="M472-120q-73-1-137.5-13.5t-112-34Q175-189 147.5-218T120-280q0 33 27.5 62t75 50.5q47.5 21.5 112 34T472-120Zm-71-204q-30-3-58-8t-53.5-12q-25.5-7-48-15.5T200-379q19 11 41.5 19.5t48 15.5q25.5 7 53.5 12t58 8Zm79-275q86 0 177.5-26T760-679q-11-29-100.5-55T480-760q-91 0-178.5 25.5T200-679q15 29 104.5 54.5T480-599Zm-61 396q10 23 23 44t30 39q-73-1-137.5-13.5t-112-34Q175-189 147.5-218T120-280v-400q0-33 28.5-62t77.5-51q49-22 114.5-34.5T480-840q74 0 139.5 12.5T734-793q49 22 77.5 51t28.5 62q0 33-28.5 62T734-567q-49 22-114.5 34.5T480-520q-85 0-157-15t-123-44v101q40 37 100 54t121 22q-8 15-13 34.5t-7 43.5q-60-7-111.5-20T200-379v99q14 25 77 47t142 30ZM864-40 756-148q-22 13-46 20.5t-50 7.5q-75 0-127.5-52.5T480-300q0-75 52.5-127.5T660-480q75 0 127.5 52.5T840-300q0 26-7.5 50T812-204L920-96l-56 56ZM731-229q29-29 29-71t-29-71q-29-29-71-29t-71 29q-29 29-29 71t29 71q29 29 71 29t71-29Z"/></symbol>
+  <symbol id="d-deployed_code_history" viewBox="0 -960 960 960"><path d="M747.33-198.67v-120H706v133.19L800.67-96 828-123.33l-80.67-75.34ZM480-815.33 223-667l257 149 256.33-149L480-815.33ZM120-313.67v-332.66q0-18 8.75-33.19 8.75-15.2 24.58-24.48l293.34-169q8.66-5 16.46-7 7.81-2 16.84-2 9.03 0 17.36 2 8.34 2 16 7l293.34 169q15.83 9.28 24.58 24.48 8.75 15.19 8.75 33.19v193h-66.67V-612l-293 170.67-293.66-170V-314l280 161.67v76.66L153.33-256q-15.83-9.28-24.58-24.48-8.75-15.19-8.75-33.19ZM590.17-56.43q-56.84-56.44-56.84-136.5 0-80.07 56.84-136.9 56.83-56.84 136.5-56.84 79.66 0 136.5 56.75Q920-273.18 920-192.67q0 79.96-56.83 136.32Q806.33 0 726.67 0 647 0 590.17-56.43ZM480-482.33Z"/></symbol>
+  <symbol id="d-edit" viewBox="0 -960 960 960"><path d="M186.67-186.67H235L680-631l-48.33-48.33-445 444.33v48.33ZM120-120v-142l559.33-558.33q9.34-9 21.5-14 12.17-5 25.5-5 12.67 0 25 5 12.34 5 22 14.33L821-772q10 9.67 14.5 22t4.5 24.67q0 12.66-4.83 25.16-4.84 12.5-14.17 21.84L262-120H120Zm652.67-606-46-46 46 46Zm-117 71-24-24.33L680-631l-24.33-24Z"/></symbol>
+  <symbol id="d-event" viewBox="0 -960 960 960"><path d="M521.67-255.12q-28.34-28.46-28.34-69.67t28.46-69.54q28.45-28.34 69.67-28.34 41.21 0 69.54 28.46 28.33 28.45 28.33 69.67 0 41.21-28.45 69.54-28.46 28.33-69.67 28.33t-69.54-28.45ZM186.67-80q-27 0-46.84-19.83Q120-119.67 120-146.67v-600q0-27 19.83-46.83 19.84-19.83 46.84-19.83h56.66V-880h70v66.67h333.34V-880h70v66.67h56.66q27 0 46.84 19.83Q840-773.67 840-746.67v600q0 27-19.83 46.84Q800.33-80 773.33-80H186.67Zm0-66.67h586.66v-420H186.67v420Zm0-486.66h586.66v-113.34H186.67v113.34Zm0 0v-113.34 113.34Z"/></symbol>
+  <symbol id="d-extension" viewBox="0 -960 960 960"><path d="M186.67-186.67h546.66V-376l42.34-20q18-8 28.83-25.33 10.83-17.34 10.83-37.34 0-19.95-10.83-36.98-10.83-17.02-28.83-25.68L733.33-541v-192.33h-198L526-790q-4.33-25.33-22.95-42.67Q484.44-850 459.62-850q-25.95 0-44.79 17.33Q396-815.33 391.67-790l-9.34 56.67h-195v102Q242.67-611 276-564.15q33.33 46.86 33.33 105.67 0 59.81-33.33 107.15-33.33 47.33-89.33 65v99.66ZM194-120q-30.67 0-52.33-21.67-21.67-21.66-21.67-53V-338q50.67-2 86.67-36.17 36-34.16 36-84.5 0-50-36-84.33t-86-36.26V-726q0-31 21.5-52.5t52.5-21.5H326q6.75-49.58 44.39-83.12 37.63-33.55 88.77-33.55 50.17 0 87.96 33.55 37.79 33.54 45.55 83.12H726q31 0 52.5 21.5T800-726v142.67q37.33 18 59.67 50.33Q882-500.67 882-458.67q0 42.34-22.33 75Q837.33-351 800-334v139.33q0 31.34-21.5 53Q757-120 726-120H194Zm307.33-338.67Z"/></symbol>
+  <symbol id="d-feedback" viewBox="0 -960 960 960"><path d="M479.99-364.67q15.01 0 25.18-10.15 10.16-10.16 10.16-25.17 0-15.01-10.15-25.18-10.16-10.16-25.17-10.16-15.01 0-25.18 10.15-10.16 10.16-10.16 25.17 0 15.01 10.15 25.18 10.16 10.16 25.17 10.16Zm-33.32-148h66.66V-760h-66.66v247.33ZM80-80v-733.33q0-27 19.83-46.84Q119.67-880 146.67-880h666.66q27 0 46.84 19.83Q880-840.33 880-813.33v506.66q0 27-19.83 46.84Q840.33-240 813.33-240H240L80-80Zm131.33-226.67h602v-506.66H146.67v575l64.66-68.34Zm-64.66 0v-506.66 506.66Z"/></symbol>
+  <symbol id="d-fit_screen" viewBox="0 -960 960 960"><path d="M813.33-606.67v-126.66H686.67V-800h126.66q27 0 46.84 19.83Q880-760.33 880-733.33v126.66h-66.67Zm-733.33 0v-126.66q0-27 19.83-46.84Q119.67-800 146.67-800h126.66v66.67H146.67v126.66H80ZM686.67-160v-66.67h126.66v-126.66H880v126.66q0 27-19.83 46.84Q840.33-160 813.33-160H686.67Zm-540 0q-27 0-46.84-19.83Q80-199.67 80-226.67v-126.66h66.67v126.66h126.66V-160H146.67Zm66.66-133.33v-373.34h533.34v373.34H213.33ZM280-360h400v-240H280v240Zm0 0v-240 240Z"/></symbol>
+  <symbol id="d-folder" viewBox="0 -960 960 960"><path d="M146.67-160q-27 0-46.84-20.17Q80-200.33 80-226.67v-506.66q0-26.34 19.83-46.5Q119.67-800 146.67-800H414l66.67 66.67h332.66q26.34 0 46.5 20.16Q880-693 880-666.67v440q0 26.34-20.17 46.5Q839.67-160 813.33-160H146.67Zm0-66.67h666.66v-440H453l-66.67-66.66H146.67v506.66Zm0 0v-506.66V-226.67Z"/></symbol>
+  <symbol id="d-format_list_numbered" viewBox="0 -960 960 960"><path d="M120-80v-60h100v-30h-60v-60h60v-30H120v-60h120q17 0 28.5 11.5T280-280v40q0 17-11.5 28.5T240-200q17 0 28.5 11.5T280-160v40q0 17-11.5 28.5T240-80H120Zm0-280v-110q0-17 11.5-28.5T160-510h60v-30H120v-60h120q17 0 28.5 11.5T280-560v70q0 17-11.5 28.5T240-450h-60v30h100v60H120Zm60-280v-180h-60v-60h120v240h-60Zm186 434v-66.67h474V-206H366Zm0-242v-66.67h474V-448H366Zm0-242v-66.67h474V-690H366Z"/></symbol>
+  <symbol id="d-forum" viewBox="0 -960 960 960"><path d="M880-80.67 720.67-240h-414q-27.5 0-47.09-19.58Q240-279.17 240-306.67v-66.66h440q27.5 0 47.08-19.59 19.59-19.58 19.59-47.08v-280h66.66q27.5 0 47.09 19.58Q880-680.83 880-653.33v572.66ZM146.67-441l65.66-65.67h401v-306.66H146.67V-441ZM80-280v-533.33q0-27.5 19.58-47.09Q119.17-880 146.67-880h466.66q27.5 0 47.09 19.58Q680-840.83 680-813.33v306.66q0 27.5-19.58 47.09Q640.83-440 613.33-440H240L80-280Zm66.67-226.67v-306.66 306.66Z"/></symbol>
+  <symbol id="d-group" viewBox="0 -960 960 960"><path d="M38.67-160v-100q0-34.67 17.83-63.17T105.33-366q69.34-31.67 129.67-46.17 60.33-14.5 123.67-14.5 63.33 0 123.33 14.5T611.33-366q31 14.33 49.17 42.83T678.67-260v100h-640Zm706.66 0v-102.67q0-56.66-29.5-97.16t-79.16-66.84q63 7.34 118.66 22.5 55.67 15.17 94 35.5 34 19.34 53 46.17 19 26.83 19 59.83V-160h-176ZM249-524.33Q205.33-568 205.33-634T249-743.67q43.67-43.66 109.67-43.66t109.66 43.66Q512-700 512-634t-43.67 109.67q-43.66 43.66-109.66 43.66T249-524.33Zm439.33 0q-43.66 43.66-109.66 43.66-11 0-25.67-1.83-14.67-1.83-25.67-5.5 25-27.33 38.17-64.67Q578.67-590 578.67-634t-13.17-80q-13.17-36-38.17-66 12-3.67 25.67-5.5 13.67-1.83 25.67-1.83 66 0 109.66 43.66Q732-700 732-634t-43.67 109.67Zm-583 297.66H612V-260q0-14.33-8.17-27.33-8.16-13-20.5-18.67-66-30.33-117-42.17-51-11.83-107.66-11.83-56.67 0-108 11.83-51.34 11.84-117.34 42.17-12.33 5.67-20.16 18.67-7.84 13-7.84 27.33v33.33Zm315.17-345.5Q445.33-597 445.33-634t-24.83-61.83q-24.83-24.84-61.83-24.84t-61.84 24.84Q272-671 272-634t24.83 61.83q24.84 24.84 61.84 24.84t61.83-24.84Zm-61.83 345.5Zm0-407.33Z"/></symbol>
+  <symbol id="d-groups" viewBox="0 -960 960 960"><path d="M0-240v-56.33q0-40.05 42.33-65.19 42.34-25.15 111.25-25.15 12.45 0 23.93.5 11.49.5 22.49 2.27-10 18.57-15 38.11-5 19.55-5 40.79v65H0Zm240 0v-65q0-32 17.5-58.5T307-410q32-20 76.5-30t96.5-10q53 0 97.5 10t76.5 30q32 20 49 46.5t17 58.5v65H240Zm540 0v-65q0-21.91-4.5-41.29t-14.17-37.56q11-1.82 22.28-2.32 11.29-.5 23.06-.5 69 0 111.16 24.68Q960-337.31 960-296.33V-240H780Zm-471.67-66.67H652v-4q-3.33-31.33-52.17-52Q551-383.33 480-383.33t-119.83 20.66Q311.33-342 308.33-310v3.33ZM153.04-420q-30.04 0-51.54-21.54T80-493.33q0-30.67 21.54-52 21.54-21.34 51.79-21.34 30.67 0 52 21.34 21.34 21.33 21.34 52.29 0 30.04-21.34 51.54Q184-420 153.04-420Zm653.34 0q-30.05 0-51.55-21.54-21.5-21.54-21.5-51.79 0-30.67 21.55-52 21.54-21.34 51.79-21.34 30.66 0 52 21.34Q880-524 880-493.04q0 30.04-21.33 51.54-21.34 21.5-52.29 21.5ZM480-480q-50 0-85-35t-35-85q0-51 35-85.5t85-34.5q51 0 85.5 34.5T600-600q0 50-34.5 85T480-480Zm.23-66.67q22.77 0 37.94-15.4 15.16-15.4 15.16-38.16 0-22.77-15.26-37.94-15.27-15.16-37.84-15.16-22.56 0-38.06 15.26-15.5 15.27-15.5 37.84 0 22.56 15.4 38.06 15.4 15.5 38.16 15.5Zm.1 240ZM480-600Z"/></symbol>
+  <symbol id="d-handshake" viewBox="0 -960 960 960"><path d="M475-146.67q4.67 0 10.33-2.33 5.67-2.33 9-5.67l334-334.66Q841-502 847.17-518.11q6.16-16.11 6.16-32.22 0-16.67-6.16-32.84-6.17-16.16-18.84-28.5L651.67-788.33q-12.34-12.67-28.5-18.84-16.17-6.16-32.84-6.16-16.11 0-32.22 6.16Q542-801 529.33-788.33l-15.66 15.66L592.33-693Q606-679 615-660.67q9 18.34 9 39.67 0 39.33-29.17 68.17Q565.67-524 526.33-524q-23.33 0-40.5-7.33-17.16-7.34-30.95-21.23L381-626 202-447q-4.33 4.33-6.17 9.18-1.83 4.86-1.83 10.4 0 11.09 7.67 18.92 7.66 7.83 18.77 7.83 5.56 0 10.56-2.66 5-2.67 8.33-6l137.34-137.34L423.33-500 287-363.33q-4.33 4.33-6.17 9.5-1.83 5.16-1.83 10.5 0 10.66 8 18.66t18.67 8q5.33 0 10.33-2.33t8.33-5.67l137.34-137L508.33-415 372-278.33q-3.67 3.33-5.83 8.89-2.17 5.55-2.17 11.11 0 10.66 8 18.66t18.67 8q5.33 0 9.83-1.83t8.83-6.17l137.34-137L593.33-330 456-192.67q-4.33 4.34-6.17 9.5Q448-178 448-173.33q0 12 7.5 19.33 7.5 7.33 19.5 7.33ZM474.71-80q-34.38 0-61.21-24.5t-31.83-60.91q-34-4.92-57-27.92t-28-57q-34-5-56.5-28.5t-27.5-56.5q-37.34-5-61.34-31t-24-62q0-18 6.99-35.54 6.98-17.53 20.01-30.8L381-721l117 117q6 6.33 13.56 9.83 7.55 3.5 15.11 3.5 11.66 0 21.33-9.5 9.67-9.5 9.67-21.27 0-5.23-2.84-11.56-2.83-6.33-9.16-12.33l-143-143q-12.34-12.67-28.5-18.84-16.17-6.16-32.84-6.16-16.11 0-32.22 6.16Q293-801 280.37-788.43L132-639.67q-12.33 12.34-18 26.67-5.67 14.33-7 31.33t5 33.5q6.33 16.5 16.33 30.17l-48 48q-19-22.33-30-52.17-11-29.83-10.33-60.5.67-29.33 12.33-56.5Q64-666.33 85-687.33L232.67-835q22.66-22.33 51.03-33.33 28.36-11 58.16-11 29.81 0 57.97 11 28.17 11 50.5 33.33L466-819.33 481.67-835q22.66-22.33 51.03-33.33 28.36-11 58.16-11 29.81 0 57.97 11 28.17 11 50.5 33.33L875-659.33q22.33 22.33 33.67 51.02Q920-579.62 920-549.98q0 29.65-11.33 57.81Q897.33-464 875-441.67L541-108q-13.33 13.33-30.52 20.67Q493.29-80 474.71-80Zm-98.38-550.67Z"/></symbol>
+  <symbol id="d-how_to_vote" viewBox="0 -960 960 960"><path d="M186.67-80q-27 0-46.84-19.83Q120-119.67 120-146.67v-192.66l126.67-141 47.66 47.66-105.33 116h582L671-430l47.67-47.67L840-339.33v192.66q0 27-19.83 46.84Q800.33-80 773.33-80H186.67Zm0-66.67h586.66V-250H186.67v103.33ZM436.33-385l-153-153Q263-558.33 264.5-585.17q1.5-26.83 21.17-46.5l206.66-206.66q18.96-18.71 46.98-19.52 28.02-.82 47.69 18.85l153 153q19 19 19.67 45.67.66 26.66-20.34 47.66l-208 208q-19 19-46.83 19.5T436.33-385Zm251-256-147-147-204.66 204.67 147 147L687.33-641ZM186.67-146.67V-250v103.33Z"/></symbol>
+  <symbol id="d-hub" viewBox="0 -960 960 960"><path d="M155-75q-35-35-35-85t35-85q35-35 85-35 14 0 26 3t23 8l57-71q-28-31-39-70t-5-78l-81-27q-17 25-43 40t-58 15q-50 0-85-35T0-580q0-50 35-85t85-35q50 0 85 35t35 85v8l81 28q20-36 53.5-61t75.5-32v-87q-39-11-64.5-42.5T360-840q0-50 35-85t85-35q50 0 85 35t35 85q0 42-26 73.5T510-724v87q42 7 75.5 32t53.5 61l81-28v-8q0-50 35-85t85-35q50 0 85 35t35 85q0 50-35 85t-85 35q-32 0-58.5-15T739-515l-81 27q6 39-5 77.5T614-340l57 70q11-5 23-7.5t26-2.5q50 0 85 35t35 85q0 50-35 85t-85 35q-50 0-85-35t-35-85q0-20 6.5-38.5T624-232l-57-71q-41 23-87.5 23T392-303l-56 71q11 15 17.5 33.5T360-160q0 50-35 85t-85 35q-50 0-85-35Zm-35-465q17 0 28.5-11.5T160-580q0-17-11.5-28.5T120-620q-17 0-28.5 11.5T80-580q0 17 11.5 28.5T120-540Zm148.5 408.5Q280-143 280-160t-11.5-28.5Q257-200 240-200t-28.5 11.5Q200-177 200-160t11.5 28.5Q223-120 240-120t28.5-11.5Zm240-680Q520-823 520-840t-11.5-28.5Q497-880 480-880t-28.5 11.5Q440-857 440-840t11.5 28.5Q463-800 480-800t28.5-11.5ZM480-360q42 0 71-29t29-71q0-42-29-71t-71-29q-42 0-71 29t-29 71q0 42 29 71t71 29Zm268.5 228.5Q760-143 760-160t-11.5-28.5Q737-200 720-200t-28.5 11.5Q680-177 680-160t11.5 28.5Q703-120 720-120t28.5-11.5Zm120-420Q880-563 880-580t-11.5-28.5Q857-620 840-620t-28.5 11.5Q800-597 800-580t11.5 28.5Q823-540 840-540t28.5-11.5ZM480-840ZM120-580Zm360 120Zm360-120ZM240-160Zm480 0Z"/></symbol>
+  <symbol id="d-image" viewBox="0 -960 960 960"><path d="M186.67-120q-27 0-46.84-19.83Q120-159.67 120-186.67v-586.66q0-27 19.83-46.84Q159.67-840 186.67-840h586.66q27 0 46.84 19.83Q840-800.33 840-773.33v586.66q0 27-19.83 46.84Q800.33-120 773.33-120H186.67Zm0-66.67h586.66v-586.66H186.67v586.66ZM237.33-278h486l-148-197.33-128 167.33-92-124.67-118 154.67Zm-50.66 91.33v-586.66 586.66Z"/></symbol>
+  <symbol id="d-layers" viewBox="0 -960 960 960"><path d="M480-126 120-406l55.33-41.33L480-210.67l304.67-236.66L840-406 480-126Zm0-168.67-360-280 360-280 360 280-360 280Zm0-294Zm0 209.34 251.33-195.34L480-770 228.67-574.67 480-379.33Z"/></symbol>
+  <symbol id="d-link" viewBox="0 -960 960 960"><path d="M446.67-280H280q-83 0-141.5-58.5T80-480q0-83 58.5-141.5T280-680h166.67v66.67H280q-55.56 0-94.44 38.84-38.89 38.84-38.89 94.33 0 55.49 38.89 94.49 38.88 39 94.44 39h166.67V-280ZM323.33-446.67v-66.66h313.34v66.66H323.33Zm190 166.67v-66.67H680q55.56 0 94.44-38.84 38.89-38.84 38.89-94.33 0-55.49-38.89-94.49-38.88-39-94.44-39H513.33V-680H680q83 0 141.5 58.5T880-480q0 83-58.5 141.5T680-280H513.33Z"/></symbol>
+  <symbol id="d-login" viewBox="0 -960 960 960"><path d="M480.67-120v-66.67h292.66v-586.66H480.67V-840h292.66q27 0 46.84 19.83Q840-800.33 840-773.33v586.66q0 27-19.83 46.84Q800.33-120 773.33-120H480.67Zm-63.34-176.67-47-48 102-102H120v-66.66h351l-102-102 47-48 184 184-182.67 182.66Z"/></symbol>
+  <symbol id="d-map" viewBox="0 -960 960 960"><path d="m608-120-255.33-90-181.34 71.33q-18 8.67-34.66-2.16Q120-151.67 120-172v-558.67q0-13 7.5-23t19.83-15L352.67-840 608-750.67 788.67-822q18-8 34.66 2.5Q840-809 840-788.67v563.34q0 11.66-7.5 20.33-7.5 8.67-19.17 13L608-120Zm-36-82.67v-492.66L388-758v492.67l184 62.66Zm66.67 0 134.66-44.66v-499.34l-134.66 51.34v492.66Zm-452-11.33 134.66-51.33V-758l-134.66 44.67V-214Zm452-481.33v492.66-492.66ZM321.33-758v492.67V-758Z"/></symbol>
+  <symbol id="d-map_search" viewBox="0 -960 960 960"><path d="M638.67-527.33v-1 1-168 168ZM171.33-138.67q-18 8.67-34.66-2.16Q120-151.67 120-172v-558.67q0-13 7.5-23t19.83-15L352.67-840 608-750.67 788.67-822q18-8 34.66 2.5Q840-809 840-788.67v371q-12.33-21.66-29.17-39.66-16.83-18-37.5-32v-257.34l-134.66 51.34v168q-17.67 1.33-34.34 4.5-16.66 3.16-32.33 8.83v-181.33L388-758v534.33l-216.67 85ZM186.67-214l134.66-51.33V-758l-134.66 44.67V-214Zm524.16-31.33q24.84-24 25.17-62.67.33-36.67-24.83-61.67-25.17-25-61.84-25-36.66 0-61.66 25t-25 61.67q0 36.67 25 61.67t61.66 25q36.67 0 61.5-24Zm-61.5 90.66q-63.33 0-108.33-45T496-308q0-64 45-108.67 45-44.66 108.33-44.66 64 0 108.67 44.66Q802.67-372 802.67-308q0 23-6.17 43.83-6.17 20.84-17.83 38.84L880-124l-44 44-101.33-100.67q-18.67 13-39.84 19.5-21.16 6.5-45.5 6.5ZM321.33-758v492.67V-758Z"/></symbol>
+  <symbol id="d-monitoring" viewBox="0 -960 960 960"><path d="M120-120v-77.33L186.67-264v144H120Zm163.33 0v-237.33L350-424v304h-66.67Zm163.34 0v-304l66.66 67.67V-120h-66.66ZM610-120v-236.33L676.67-423v303H610Zm163.33 0v-397.33L840-584v464h-66.67ZM120-346.33v-94.34l280-278.66 160 160L840-840v94.33L560-465 400-625 120-346.33Z"/></symbol>
+  <symbol id="d-payments" viewBox="0 -960 960 960"><path d="M546.67-426.67q-50 0-85-35t-35-85q0-50 35-85t85-35q50 0 85 35t35 85q0 50-35 85t-85 35ZM240-293.33q-27.5 0-47.08-19.59-19.59-19.58-19.59-47.08v-373.33q0-27.5 19.59-47.09Q212.5-800 240-800h613.33q27.5 0 47.09 19.58Q920-760.83 920-733.33V-360q0 27.5-19.58 47.08-19.59 19.59-47.09 19.59H240ZM333.33-360H760q0-39 27.17-66.17 27.16-27.16 66.16-27.16V-640q-39 0-66.16-27.17Q760-694.33 760-733.33H333.33q0 39-27.16 66.16Q279-640 240-640v186.67q39 0 66.17 27.16Q333.33-399 333.33-360ZM800-160H106.67q-27.5 0-47.09-19.58Q40-199.17 40-226.67V-680h66.67v453.33H800V-160ZM240-360v-373.33V-360Z"/></symbol>
+  <symbol id="d-person" viewBox="0 -960 960 960"><path d="M370.33-524.33Q326.67-568 326.67-634t43.66-109.67Q414-787.33 480-787.33t109.67 43.66Q633.33-700 633.33-634t-43.66 109.67Q546-480.67 480-480.67t-109.67-43.66ZM160-160v-100q0-36.67 18.5-64.17T226.67-366q65.33-30.33 127.66-45.5 62.34-15.17 125.67-15.17t125.33 15.5q62 15.5 127.34 45.17 30.33 14.33 48.83 41.83T800-260v100H160Zm66.67-66.67h506.66V-260q0-14.33-8.16-27-8.17-12.67-20.5-19-60.67-29.67-114.34-41.83Q536.67-360 480-360t-111 12.17Q314.67-335.67 254.67-306q-12.34 6.33-20.17 19-7.83 12.67-7.83 27v33.33Zm315.16-345.5Q566.67-597 566.67-634t-24.84-61.83Q517-720.67 480-720.67t-61.83 24.84Q393.33-671 393.33-634t24.84 61.83Q443-547.33 480-547.33t61.83-24.84ZM480-634Zm0 407.33Z"/></symbol>
+  <symbol id="d-person_search" viewBox="0 -960 960 960"><path d="M440.33-493.33q-63.66 0-108.66-45.05-45-45.04-45-108.29 0-64 45.04-108.66Q376.75-800 440-800q64 0 108.67 44.67 44.66 44.66 44.66 108.33t-44.66 108.67q-44.67 45-108.34 45ZM440-560q36.33 0 61.5-25.46t25.17-61.21q0-36.33-25.17-61.5-25.17-25.16-61.17-25.16t-61.5 25.16Q353.33-683 353.33-647t25.46 61.5Q404.25-560 440-560ZM893.33-20l-136-136q-22.33 15.33-46.66 22.33-24.34 7-50.38 7-72.34 0-122.98-50.58-50.64-50.57-50.64-122.83 0-72.25 50.58-122.75 50.57-50.5 122.83-50.5 72.25 0 122.75 50.64t50.5 122.98q0 26.04-7 50.38-7 24.33-22.33 46.66l136 136L893.33-20ZM736-224q30.67-30.67 30.67-76T736-376q-30.67-30.67-76-30.67T584-376q-30.67 30.67-30.67 76T584-224q30.67 30.67 76 30.67T736-224Zm-616 64v-99.67q0-36 17.33-63 17.34-27 49.34-43.33 48.33-24 120-43.67 71.66-19.66 149.66-16.33-9.33 14.67-16.83 31.83-7.5 17.17-11.83 34.5-72 1-126.34 19.17Q247-322.33 215-306q-12.67 7-20.5 19.17-7.83 12.16-7.83 27.16v33h241q9 18.67 17.83 35 8.83 16.34 20.17 31.67H120Zm320-486.67Zm-12.33 420Z"/></symbol>
+  <symbol id="d-play_circle" viewBox="0 -960 960 960"><path d="M382-306.67 653.33-480 382-653.33v346.66ZM480-80q-82.33 0-155.33-31.5-73-31.5-127.34-85.83Q143-251.67 111.5-324.67T80-480q0-83 31.5-156t85.83-127q54.34-54 127.34-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 82.33-31.5 155.33-31.5 73-85.5 127.34Q709-143 636-111.5T480-80Zm0-66.67q139.33 0 236.33-97.33t97-236q0-139.33-97-236.33t-236.33-97q-138.67 0-236 97-97.33 97-97.33 236.33 0 138.67 97.33 236 97.33 97.33 236 97.33ZM480-480Z"/></symbol>
+  <symbol id="d-rule" viewBox="0 -960 960 960"><path d="m576-160-46.67-46.67L638-315.33 529.33-424 576-470.67 684.67-362l108.66-108.67L840-424 731.33-315.33 840-206.67 793.33-160 684.67-268.67 576-160Zm81.67-369.33-142-142L562.33-718l95 94.33 176-176L880-752 657.67-529.33ZM80-286.67v-66.66h360v66.66H80Zm0-320v-66.66h360v66.66H80Z"/></symbol>
+  <symbol id="d-schedule" viewBox="0 -960 960 960"><path d="m622-288.67 48.67-48.66-155.34-156v-195.34h-66.66v222l173.33 178ZM480-80q-82.33 0-155.33-31.5-73-31.5-127.34-85.83Q143-251.67 111.5-324.67T80-480q0-82.33 31.5-155.33 31.5-73 85.83-127.34Q251.67-817 324.67-848.5T480-880q82.33 0 155.33 31.5 73 31.5 127.34 85.83Q817-708.33 848.5-635.33T880-480q0 82.33-31.5 155.33-31.5 73-85.83 127.34Q708.33-143 635.33-111.5T480-80Zm0-400Zm0 333.33q137.67 0 235.5-97.83 97.83-97.83 97.83-235.5 0-137.67-97.83-235.5-97.83-97.83-235.5-97.83-137.67 0-235.5 97.83-97.83 97.83-97.83 235.5 0 137.67 97.83 235.5 97.83 97.83 235.5 97.83Z"/></symbol>
+  <symbol id="d-school" viewBox="0 -960 960 960"><path d="M479.33-120 192.67-276.67v-240L40-600l439.33-240L920-600v318h-66.67v-280L766-516.67v240L479.33-120Zm0-316 301.34-164-301.34-162-300 162 300 164Zm0 240.33 220-120.66v-162.34L479.33-360l-220-120v163.67l220 120.66ZM480-436Zm-.67 79.33Zm0 0Z"/></symbol>
+  <symbol id="d-search_insights" viewBox="0 -960 960 960"><path d="M400.04-306.67q105.29 0 179.63-74.08Q654-454.83 654-560.67q0-105.27-74.33-178.97-74.34-73.69-179.63-73.69-105.3 0-179 73.69-73.71 73.7-73.71 178.97 0 105.84 73.71 179.92 73.7 74.08 179 74.08Zm-32.71-138.66v-271.34H434v271.34h-66.67Zm-143.33 0v-189.34h66.67v189.34H224Zm286.67 0V-594h66.66v148.67h-66.66ZM833.33-80l-231-231.67q-41.66 34-93.16 52.84Q457.68-240 400-240q-133.33 0-226.33-93.33-93-93.34-93-227.14 0-133.8 92.86-226.67Q266.39-880 400.2-880q133.8 0 227.13 93 93.34 93 93.34 226.33 0 57.68-18.84 109.17Q683-400 649-358.33l231 231L833.33-80Z"/></symbol>
+  <symbol id="d-task_alt" viewBox="0 -960 960 960"><path d="M480-80q-84.33 0-157.33-30.83-73-30.84-127-84.84t-84.84-127Q80-395.67 80-480q0-83.67 30.83-156.67 30.84-73 84.84-127t127-85.16Q395.67-880 480-880q71.67 0 134.33 22.33Q677-835.33 728-796l-48 48.33q-42-31.33-92.33-48.5-50.34-17.16-107.67-17.16-141 0-237.17 96.16Q146.67-621 146.67-480t96.16 237.17Q339-146.67 480-146.67t237.17-96.16Q813.33-339 813.33-480q0-26-3.66-51-3.67-25-11-48.67L851-632q14.33 35.33 21.67 73.33 7.33 38 7.33 78.67 0 84.33-31.17 157.33-31.16 73-85.16 127t-127 84.84Q563.67-80 480-80Zm-58-217.33L255.33-464.67 304-513.33l118 118L831.33-805l49.34 48.67-458.67 459Z"/></symbol>
+  <symbol id="d-visibility" viewBox="0 -960 960 960"><path d="M602.83-377.17q50.5-50.5 50.5-122.83t-50.5-122.83q-50.5-50.5-122.83-50.5t-122.83 50.5q-50.5 50.5-50.5 122.83t50.5 122.83q50.5 50.5 122.83 50.5t122.83-50.5ZM401.5-421.5q-32.17-32.17-32.17-78.5t32.17-78.5q32.17-32.17 78.5-32.17t78.5 32.17q32.17 32.17 32.17 78.5t-32.17 78.5q-32.17 32.17-78.5 32.17t-78.5-32.17Zm-186.17 139Q96.67-365 40-500q56.67-135 175.33-217.5Q334-800 480-800t264.67 82.5Q863.33-635 920-500q-56.67 135-175.33 217.5Q626-200 480-200t-264.67-82.5ZM480-500Zm217.5 169.83q99.17-63.5 151.17-169.83-52-106.33-151.17-169.83-99.17-63.5-217.5-63.5t-217.5 63.5Q163.33-606.33 110.67-500q52.66 106.33 151.83 169.83 99.17 63.5 217.5 63.5t217.5-63.5Z"/></symbol>
+</svg>
+
+<div class="viewport" id="viewport"><div class="stage" id="stage" data-title="Proyecto de ejemplo" data-numeros data-logo="marca-dp/logos/Icono_DP_Azul.svg" data-logo-oscuro="marca-dp/logos/Icono_DP_Blanco.svg" data-logo-pos="sup-der" data-logo-alto="52">
+
+<!-- =====================================================================
+  DECK DP DE EJEMPLO. Todo es ficticio: reemplaza textos y cifras, y borra lo que no uses.
+  - Cada lámina: <section class="slide dp"> (clara) o class="slide dp oscura" con <div class="tex"></div>.
+  - Título-afirmación en .hd .t y bajada en .sub. El cuerpo va en .cuerpo.
+  - Logo fijo (arriba a la derecha), número y pie los pone el deck: nunca los pegues a mano. La portada, que trae su propio logo, lleva data-sin-logo.
+  - Fotos solo aportadas por el usuario, íconos con <use href="#d-nombre">, colores --blue --deep --teal8 --orange9.
+  - Guía: references/marca-dp.md.
+====================================================================== -->
+
+<section class="slide dp oscura portada2" data-sin-logo>
+  <div class="tex"></div>
+  <img class="logo" src="marca-dp/logos/Logo_DP_Blanco_Horizontal.png" alt="Dinámica Plataforma">
+  <div class="izq">
+    <span class="lab">Proyecto de ejemplo · datos ficticios</span>
+    <h1>Tres decisiones para partir en enero</h1>
+    <p class="bajada">Dónde estamos, qué falta y qué necesitamos resolver antes de fin de año.</p>
+  </div>
+  <div class="cifras">
+    <div><b>62 %</b><span>de avance general</span></div>
+    <div><b>4</b><span>frentes de trabajo</span></div>
+    <div><b>3</b><span>decisiones pendientes</span></div>
+  </div>
+  <div class="foto"><img src="marca-dp/texturas/Dp_textura01_1920.jpg" alt=""></div>
+  <aside class="voz">[foco h1] Hoy traemos tres decisiones para poder partir en enero.</aside>
+</section>
+
+<section class="slide dp" data-sec="Índice">
+  <div class="hd"><h2 class="t">Lo que veremos en veinte minutos</h2><p class="sub">De la situación actual a lo que necesitamos de ustedes</p></div>
+  <ol class="idx">
+    <li><span class="n">01</span><div><b>Dónde estamos</b><span>Avance por frente y lo que ya funciona</span></div></li>
+    <li><span class="n">02</span><div><b>Qué entrega cada línea</b><span>Cuatro líneas de trabajo, sus productos y fechas</span></div></li>
+    <li><span class="n">03</span><div><b>Cómo seguimos</b><span>Calendario, pasos y equipo</span></div></li>
+    <li><span class="n">04</span><div><b>Qué decidir hoy</b><span>Tres decisiones y su plazo</span></div></li>
+  </ol>
+  <div class="idx-foto"><img src="marca-dp/texturas/Dp_textura01_1920.jpg" alt=""></div>
+</section>
+
+<section class="slide dp" data-sec="Dónde estamos" data-src="Fuente: datos ficticios de ejemplo">
+  <div class="hd"><h2 class="t">Lo avanzado es de fondo; lo que queda es sobre todo de forma</h2><p class="sub">Cifras principales al cierre de octubre</p></div>
+  <div class="cuerpo"><div class="falta">
+    <div class="fc" style="--c:var(--blue)" data-step="1"><svg class="ic dpi"><use href="#d-task_alt"/></svg><div class="cifra">48</div><h3>Tareas cerradas</h3><p>De las 77 previstas para la primera etapa.</p><span class="q">Ejemplo</span></div>
+    <div class="fc" style="--c:var(--teal8)" data-step="2"><svg class="ic dpi"><use href="#d-groups"/></svg><div class="cifra">12</div><h3>Áreas activas</h3><p>Ya entregan su información cada semana.</p><span class="q">Ejemplo</span></div>
+    <div class="fc" style="--c:var(--orange9)" data-step="3"><svg class="ic dpi"><use href="#d-schedule"/></svg><div class="cifra">3 sem</div><h3>De holgura</h3><p>Antes de la fecha comprometida de enero.</p><span class="q">Ejemplo</span></div>
+    <div class="cifra2" data-step="4"><div class="tex"></div><span class="lab">Avance general</span><b>62 %</b><p>del plan total, cuatro puntos sobre lo previsto a esta fecha.</p></div>
+  </div></div>
+</section>
+
+<section class="slide dp" data-sec="Dónde estamos">
+  <div class="hd"><h2 class="t">Dos frentes van bien y dos necesitan una decisión</h2><p class="sub">Estado de cada frente de trabajo</p></div>
+  <div class="cuerpo"><div class="estado">
+    <div class="est lleno" style="--c:var(--deep)" data-step="1"><svg class="ic dpi"><use href="#d-database_search"/></svg><span class="lab">Datos</span><h3>Listo</h3><p>La base está cargada y se actualiza sola.</p><ul><li>Fuentes conectadas</li><li>Controles automáticos</li></ul><span class="nivel">Avanzado</span><div class="barra"><i style="--p:90%"></i></div></div>
+    <div class="est" style="--c:var(--blue)" data-step="2"><svg class="ic dpi"><use href="#d-autorenew"/></svg><span class="lab">Procesos</span><h3>En ajuste</h3><p>Funcionan y se afinan con cada revisión.</p><ul><li>Cuatro flujos definidos</li><li>Dos revisiones hechas</li></ul><span class="nivel">En curso</span><div class="barra"><i style="--p:65%"></i></div></div>
+    <div class="est" style="--c:var(--orange9)" data-step="3"><svg class="ic dpi"><use href="#d-edit"/></svg><span class="lab">Contenidos</span><h3>Por definir</h3><p>Falta acordar el alcance de la segunda etapa.</p><ul><li>Dos opciones en mesa</li><li>Decisión en diciembre</li></ul><span class="nivel">Decisión</span><div class="barra"><i style="--p:35%"></i></div></div>
+    <div class="est" style="--c:var(--teal8)" data-step="4"><svg class="ic dpi"><use href="#d-handshake"/></svg><span class="lab">Adopción</span><h3>Por partir</h3><p>El piloto parte cuando se cierre el alcance.</p><ul><li>Grupo de prueba</li><li>Dos semanas de uso</li></ul><span class="nivel">Decisión</span><div class="barra"><i style="--p:10%"></i></div></div>
+  </div></div>
+</section>
+
+<section class="slide dp" data-sec="Qué entrega">
+  <div class="hd"><h2 class="t">Cuatro líneas de trabajo, un mismo tablero de seguimiento</h2><p class="sub">Qué entrega cada una durante el primer año</p></div>
+  <div class="cuerpo"><div class="cards4">
+    <div class="c4c" style="--c:var(--blue)" data-step="1"><div class="cab"><img src="marca-dp/texturas/Dp_textura01_1920.jpg" alt=""></div><h3>Agua</h3><p>Disponibilidad y consumo por cuenca, mes a mes.</p><div class="ej"><span>Mapa</span><span>Informe</span></div></div>
+    <div class="c4c" style="--c:var(--teal8)" data-step="2"><div class="cab"><img src="marca-dp/texturas/Dp_textura01_1920.jpg" alt="" style="object-position:50% 25%"></div><h3>Energía</h3><p>Demanda proyectada y fuentes disponibles por zona.</p><div class="ej"><span>Tablero</span><span>Modelo</span></div></div>
+    <div class="c4c" style="--c:var(--orange9)" data-step="3"><div class="cab"><img src="marca-dp/texturas/Dp_textura01_1920.jpg" alt=""></div><h3>Logística</h3><p>Rutas, puertos y tiempos, con alertas de atraso.</p><div class="ej"><span>Tablero</span><span>Alertas</span></div></div>
+    <div class="c4c" style="--c:var(--deep)" data-step="4"><div class="cab"><img src="marca-dp/texturas/Dp_textura01_1920.jpg" alt="" style="object-position:50% 45%"></div><h3>Territorio</h3><p>Uso de suelo y restricciones en una sola vista.</p><div class="ej"><span>Mapa</span><span>Catastro</span></div></div>
+  </div></div>
+</section>
+
+<section class="slide dp" data-sec="Cómo seguimos">
+  <div class="hd"><h2 class="t">Del diseño a la marcha blanca en cuatro meses</h2><p class="sub">Hecho, en curso y lo que proponemos desde hoy</p></div>
+  <div class="cuerpo"><div class="gantt" data-ini="2026-10-05" data-fin="2027-02-01" data-hoy="2026-11-16">
+    <div class="g-meses"><span data-a="2026-10-05">Octubre</span><span data-a="2026-11-02">Noviembre</span><span data-a="2026-12-07">Diciembre</span><span data-a="2027-01-04">Enero</span></div>
+    <div class="g-semanas"></div>
+    <div class="g-reja"></div>
+    <div class="g-futuro"><span>Propuesta, por conversar</span></div>
+    <div class="g-hoy"><span>Hoy</span></div>
+    <div class="g-fila" style="--c:var(--navy8)"><div class="g-nom">Diagnóstico</div><div class="g-pista"><i data-a="2026-10-05" data-b="2026-11-02"></i><u data-a="2026-11-02"></u><em data-a="2026-11-02">Informe entregado</em></div></div>
+    <div class="g-fila" style="--c:var(--blue)"><div class="g-nom">Diseño</div><div class="g-pista"><i data-a="2026-10-19" data-b="2026-11-16"></i><i class="fut" data-a="2026-11-16" data-b="2026-12-14"></i></div></div>
+    <div class="g-fila" style="--c:var(--teal8)"><div class="g-nom">Desarrollo</div><div class="g-pista"><i data-a="2026-11-09" data-b="2026-11-16"></i><i class="fut" data-a="2026-11-16" data-b="2027-01-11"></i></div></div>
+    <div class="g-fila" style="--c:var(--orange9)"><div class="g-nom">Piloto</div><div class="g-pista"><i class="fut" data-a="2027-01-04" data-b="2027-01-25"></i><em class="izq" data-a="2027-01-04">Tres semanas</em></div></div>
+    <div class="g-fila" style="--c:var(--lav)"><div class="g-nom">Comité de avance</div><div class="g-pista"><u data-a="2026-10-26"></u><u data-a="2026-11-09"></u><u class="fut" data-a="2026-12-07"></u><u class="fut" data-a="2027-01-11"></u></div></div>
+    <div class="g-fila" style="--c:var(--deep)"><div class="g-nom">Marcha blanca</div><div class="g-pista"><u class="fut" data-a="2027-01-25"></u><em class="izq" data-a="2027-01-25">Inicio</em></div></div>
+    <div class="ley"><span><i></i>Hecho</span><span><i class="fut"></i>Tentativo</span></div>
+  </div></div>
+</section>
+
+<section class="slide dp" data-sec="Cómo seguimos">
+  <div class="hd"><h2 class="t">Cinco pasos, cada uno con un responsable claro</h2><p class="sub">Cómo pasa el trabajo de un equipo a otro</p></div>
+  <div class="cuerpo"><div class="macro">
+    <div class="mp" style="--c:var(--navy8)" data-step="1"><span class="n">1</span><h3>Levantar</h3><p>Reunir los datos y ordenar lo que ya existe.</p><div class="quien"><span>Análisis</span></div></div>
+    <div class="mp" style="--c:var(--deep)" data-step="2"><span class="n">2</span><h3>Diseñar</h3><p>Acordar la solución con quienes la usarán.</p><div class="quien"><span>Dirección</span></div></div>
+    <div class="mp" style="--c:var(--blue)" data-step="3"><span class="n">3</span><h3>Construir</h3><p>Desarrollar y revisar cada dos semanas.</p><div class="quien"><span>Desarrollo</span></div></div>
+    <div class="mp" style="--c:var(--teal8)" data-step="4"><span class="n">4</span><h3>Probar</h3><p>Usarlo con un grupo chico y medir.</p><div class="quien"><span>Terreno</span></div></div>
+    <div class="mp" style="--c:var(--orange9)" data-step="5"><span class="n">5</span><h3>Traspasar</h3><p>Dejarlo andando con la contraparte.</p><div class="quien"><span>Contraparte</span></div></div>
+  </div></div>
+</section>
+
+<section class="slide dp" data-sec="Cómo seguimos">
+  <div class="hd"><h2 class="t">Un equipo chico, con un responsable por frente</h2><p class="sub">Quién hace qué; los nombres se agregan al confirmar la propuesta</p></div>
+  <div class="cuerpo">
+    <div class="eq">
+      <div class="eq-c" style="--c:var(--navy8)" data-step="1"><div class="circ"><svg class="ic dpi"><use href="#d-account_tree"/></svg></div><span class="lab">Dirección</span><h3>Jefatura de proyecto</h3><p>Prioridades, plazos y relación con la contraparte.</p></div>
+      <div class="eq-c" style="--c:var(--blue)" data-step="2"><div class="circ"><svg class="ic dpi"><use href="#d-monitoring"/></svg></div><span class="lab">Análisis</span><h3>Datos e indicadores</h3><p>Fuentes, modelo y tablero de seguimiento.</p></div>
+      <div class="eq-c" style="--c:var(--teal8)" data-step="3"><div class="circ"><svg class="ic dpi"><use href="#d-map"/></svg></div><span class="lab">Terreno</span><h3>Validación local</h3><p>Visitas, entrevistas y pruebas con usuarios.</p></div>
+      <div class="eq-c" style="--c:var(--orange9)" data-step="4"><div class="circ"><svg class="ic dpi"><use href="#d-construction"/></svg></div><span class="lab">Desarrollo</span><h3>Construcción</h3><p>Herramientas, integración y traspaso.</p></div>
+    </div>
+    <div class="base" data-step="5"><img src="marca-dp/logos/Icono_DP_Blanco.svg" alt=""><div><b>Una reunión semanal con la contraparte</b><span>30 minutos · avance y bloqueos</span></div></div>
+  </div>
+</section>
+
+<section class="slide dp con-foto" data-sec="Qué decidir">
+  <div class="lado-foto"><img src="marca-dp/texturas/Dp_textura01_1920.jpg" alt=""></div>
+  <div class="hd"><h2 class="t">Tres decisiones destraban el calendario</h2><p class="sub">Cada una tiene un plazo y un responsable</p></div>
+  <div class="pasos2">
+    <div class="p2" data-step="1"><b>01</b><span>Cerrar el alcance de la segunda etapa antes del 4 de diciembre</span></div>
+    <div class="p2" data-step="2"><b>02</b><span>Definir el grupo que participa en el piloto de enero</span></div>
+    <div class="p2" data-step="3"><b>03</b><span>Confirmar quién recibe la herramienta al final</span></div>
+    <div class="ojo" data-step="4"><b>Si no se decide</b>El piloto se corre a marzo y se pierde la holgura de tres semanas.</div>
+  </div>
+</section>
+
+<section class="slide dp oscura demo cierre-dp" data-sec="Qué decidir">
+  <div class="tex t1"></div>
+  <div class="izq">
+    <span class="lab">Próximo paso</span>
+    <h2>Necesitamos su acuerdo esta semana</h2>
+    <p>Con las tres decisiones tomadas, partimos el piloto en enero y mantenemos la fecha comprometida.</p>
+  </div>
+  <div class="pide"><svg class="ic dpi"><use href="#d-handshake"/></svg><b>Decidir antes del 4 de diciembre</b><span>Comité de avance, 30 minutos</span></div>
+</section>
+
+</div></div>
+<div class="ui"><div class="bar" id="bar"></div></div>
+<div class="rotate">Gira el teléfono para ver mejor ↻</div>
+
+<script src="marca-dp/dp.js" defer></script>
+<script>
+/* ===================== SIMULADORES (como en el informe) ===================== */
+const SIMULADORES = {
+  repartidores(r) {
+    const c = r * 60 / 26, piden = 2.8, perdida = Math.max(0, (piden - c) / piden);
+    return { c: c.toFixed(1).replace('.', ','), perdida: Math.round(perdida * 100) + ' %',
+      perdidaTxt: perdida > 0 ? `se pierde (1 de cada ${Math.round(1 / perdida)})` : 'no se pierde nada',
+      gauge: Math.min(1, c / 7), marca: piden / 7 };
+  },
+};
+
+(() => {
+  const stage = document.getElementById('stage');
+  const slides = [...stage.querySelectorAll(':scope > .slide')];
+  const bar = document.getElementById('bar');
+  const estatico = new URLSearchParams(location.search).has('estatico') || /[?&]estatico\b/.test(location.hash);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (estatico) document.documentElement.classList.add('estatico');
+
+  // Marco de cada lámina: sección y título arriba, fuente y número abajo
+  const title = stage.dataset.title || '';
+  const secs = [...new Set(slides.map(s => s.dataset.sec).filter(Boolean))];
+  // Marco sobrio: sin barra superior en portada ni cierre; la fuente solo si la lámina trae data-src;
+  // el número de lámina solo con data-numeros en .stage
+  const conNumeros = stage.hasAttribute('data-numeros');
+  slides.forEach((s, k) => {
+    if (s.dataset.sec && !s.matches('.portada,.cierre')) s.insertAdjacentHTML('afterbegin', `<div class="mbar"><b>${s.dataset.sec}</b><span>${title}</span></div>`);
+    if (s.dataset.src) s.insertAdjacentHTML('beforeend', `<span class="srcl">${s.dataset.src}</span>`);
+    if (conNumeros && !s.classList.contains('portada') && !s.classList.contains('portada2')) s.insertAdjacentHTML('beforeend', `<span class="num">${String(k + 1).padStart(2, '0')} / ${String(slides.length).padStart(2, '0')}</span>`);
+  });
+  // Índice lateral: se arma siempre y se ve solo con .with-rail (data-rail="on" o el panel de opciones);
+  // no va en portada, separadores, partidas ni cierre
+  slides.forEach(s => {
+    if (!s.dataset.sec || s.matches('.portada,.partida,.seccion,.cierre')) return;
+    s.classList.add('r');
+    s.insertAdjacentHTML('afterbegin', `<div class="rail-s" aria-hidden="true">${secs.map((x, k) => `<span class="${x === s.dataset.sec ? 'on' : ''}" title="${x}">${String(k + 1).padStart(2, '0')}</span>`).join('')}</div>`);
+  });
+  if (stage.dataset.rail === 'on') stage.classList.add('with-rail');
+  // Pictogramas
+  document.querySelectorAll('.waffle').forEach(w => { const n = +getComputedStyle(w).getPropertyValue('--n') || 0; w.innerHTML = Array.from({ length: 10 }, (_, i) => `<i class="${i < n ? 'on' : ''}" style="--d:${i}"></i>`).join(''); });
+
+  // Animación: marca en cascada lo que entra en cada lámina (sin repetir dentro de algo ya animado)
+  const ANIM = 'h1,h2,.k,.lead,.side>div,ul.pts>li,.ilist>li,.card,.fg .fl,.fg .cap,.bars,.waffle-l,.bignum,.ba>div,.ba .arrow,.sim .ctl,.read>div,.gauge,.act,.ask,.flow>.node,.tline,.chart';
+  slides.forEach(sl => {
+    let d = 0;
+    sl.querySelectorAll(ANIM).forEach(el => {
+      if (el.closest('[data-step]') || el.hasAttribute('data-k') || el.parentElement.closest('.an')) return;
+      el.classList.add('an'); el.style.setProperty('--d', d++);
+    });
+    sl.querySelectorAll('.bars').forEach(b => [...b.children].forEach((c, k) => c.style.setProperty('--d', k)));
+    sl.querySelectorAll('.tline').forEach(t => [...t.children].forEach((c, k) => c.style.setProperty('--d', k)));
+  });
+  // Las líneas clave de los gráficos se dibujan (largo normalizado a 1)
+  document.querySelectorAll('.chart .ln-key').forEach(p => p.setAttribute('pathLength', '1'));
+  // Cifras que cuentan desde cero al entrar la lámina
+  const COUNT = '.count,.bignum .hl,.kpi .v,.ba .v,.portada .side b,.card .oc,.flow .t';
+  const firstNum = el => { const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) if (/\d/.test(n.textContent)) return n; return null; };
+  const countUp = sl => {
+    if (reduce || estatico) return;
+    sl.querySelectorAll(COUNT).forEach(el => {
+      const node = firstNum(el); if (!node) return;
+      const orig = node.__orig ?? (node.__orig = node.textContent);
+      const m = orig.match(/\d+(?:[.,]\d+)?/); if (!m) return;
+      const dec = (m[0].split(/[.,]/)[1] || '').length, sep = m[0].includes(',') ? ',' : '.';
+      const target = parseFloat(m[0].replace(',', '.')), t0 = performance.now(), dur = 1200;
+      const tick = t => {
+        const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+        node.textContent = orig.replace(m[0], (target * e).toFixed(dec).replace('.', sep));
+        if (k < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  };
+  // Simuladores
+  document.querySelectorAll('[data-sim]').forEach(el => {
+    const fn = SIMULADORES[el.dataset.sim]; if (!fn) return;
+    const btns = [...el.querySelectorAll('.pick button')];
+    const upd = v => {
+      btns.forEach(b => b.setAttribute('aria-pressed', b.dataset.v === String(v)));
+      const r = fn(+v);
+      for (const [key, val] of Object.entries(r)) el.querySelectorAll(`[data-out="${key}"]`).forEach(o => o.textContent = val);
+      el.querySelectorAll('[data-ancho]').forEach(o => o.style.setProperty('--v', r[o.dataset.ancho] ?? 0));
+      el.querySelectorAll('[data-en]').forEach(o => o.hidden = !o.dataset.en.split(' ').includes(String(v)));
+      const g = el.querySelector('.gauge'); if (g) { g.querySelector('i').style.width = (r.gauge * 100) + '%'; g.querySelector('s').style.left = (r.marca * 100) + '%'; }
+    };
+    btns.forEach(b => b.addEventListener('click', () => upd(b.dataset.v)));
+    upd(btns[0]?.dataset.v);
+  });
+
+
+  // Carta Gantt desde datos (data-ini, data-fin, data-hoy; o data-cols sin fechas)
+  document.querySelectorAll('.gantt').forEach(g => {
+    if (g.querySelector('.g-semanas')) return;   // otra carta Gantt con su propio script
+    const cols = g.dataset.cols ? g.dataset.cols.split(',').map(x => x.trim()) : null, nc = cols ? cols.length : 0;
+    const dia = f => Date.parse(f + 'T12:00:00Z');
+    const ini = cols ? 0 : dia(g.dataset.ini), fin = cols ? 0 : dia(g.dataset.fin);
+    const pf = f => (dia(f) - ini) / (fin - ini) * 100;
+    const pa = v => cols ? (+v - 1) / nc * 100 : pf(v), pb = v => cols ? +v / nc * 100 : pf(v), pm = v => cols ? (+v - .5) / nc * 100 : pf(v);
+    const mk = (tag, cls, css, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (css) e.style.cssText = css; if (txt != null) e.textContent = txt; return e; };
+    const cab = mk('div', 'gt-cab'), meses = mk('div', 'gt-meses'), sem = mk('div', 'gt-semanas'), reja = mk('div', 'gt-capa gt-reja'), alta = mk('div', 'gt-capa alta');
+    cab.append(meses, sem);
+    if (cols) {
+      g.classList.add('sf');
+      cols.forEach((c, k) => { meses.append(mk('span', '', `left:${k / nc * 100}%`, c)); reja.append(mk('i', '', `left:${k / nc * 100}%`)); });
+    } else {
+      const d = new Date(ini); d.setUTCDate(1);
+      for (let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 12); t < fin; t = Date.UTC(new Date(t).getUTCFullYear(), new Date(t).getUTCMonth() + 1, 1, 12)) {
+        const a = Math.max(ini, t), sig = Date.UTC(new Date(t).getUTCFullYear(), new Date(t).getUTCMonth() + 1, 1, 12);
+        if ((Math.min(fin, sig) - a) / (fin - ini) < .09) continue;   // un mes muy corto no lleva rótulo
+        meses.append(mk('span', '', `left:${(a - ini) / (fin - ini) * 100}%`, new Date(t).toLocaleDateString('es', { month: 'long', timeZone: 'UTC' })));
+      }
+      const lunes = new Date(ini).getUTCDay(), t0 = ini + ((8 - lunes) % 7) * 864e5, n = Math.ceil((fin - t0) / (7 * 864e5)), salto = Math.ceil(n / 24);
+      for (let t = t0, k = 0; t < fin; t += 7 * 864e5, k++) {
+        const x = (t - ini) / (fin - ini) * 100;
+        reja.append(mk('i', '', `left:${x}%`));
+        if (k % salto === 0) sem.append(mk('span', '', `left:${Math.min(98, x + 3.5 * 864e5 / (fin - ini) * 100)}%`, String(new Date(t).getUTCDate()).padStart(2, '0')));
+      }
+    }
+    const hoy = g.dataset.hoy ? (cols ? pb(g.dataset.hoy) : pf(g.dataset.hoy)) : null;
+    // Piezas: barras (data-a, data-b), continuas (.cont, sin fechas = todo el período) e hitos (<u data-a>)
+    g.querySelectorAll('.gt-fila').forEach((f, r) => f.querySelectorAll('.gt-pista > *').forEach(el => {
+      el.style.setProperty('--d', r);
+      if (el.tagName === 'U') {
+        const x = pm(el.dataset.a); el.style.left = x + '%';
+        if (hoy !== null && x > hoy) el.classList.add('fut'); return;
+      }
+      const a = el.dataset.a ? pa(el.dataset.a) : 0, b = el.dataset.b ? pb(el.dataset.b) : 100;
+      el.style.left = a + '%'; el.style.width = (b - a) + '%';
+      if (el.classList.contains('cont') || hoy === null) return;
+      el.style.setProperty('--cut', Math.max(0, Math.min(100, (hoy - a) / (b - a) * 100)) + '%');
+    }));
+    if (hoy !== null) {
+      alta.append(mk('div', 'gt-hoy', `left:${hoy}%`)); alta.firstChild.append(mk('span', '', '', 'Hoy'));
+      const fu = mk('div', 'gt-futuro', `left:${hoy}%`); fu.append(mk('span', '', '', g.dataset.futuro || 'Tentativo')); reja.append(fu);
+    }
+    g.prepend(cab, reja); g.append(alta);
+  });
+  // Pasos que se marcan: se recuerdan en este navegador (localStorage, si está disponible) y suman una barra de avance
+  document.querySelectorAll('.pasos-check').forEach((ul, q) => {
+    const KEYC = 'pasos-check:' + location.pathname + ':' + (ul.dataset.clave || q);
+    let st = []; try { st = JSON.parse(localStorage.getItem(KEYC)) || []; } catch {}
+    const items = [...ul.children];
+    ul.setAttribute('data-interactivo', '');
+    const av = document.createElement('div'); av.className = 'pc-avance'; av.setAttribute('data-interactivo', '');
+    av.innerHTML = '<div class="pc-barra"><i></i></div><span></span>';
+    ul.after(av);
+    const pintar = () => {
+      const n = items.filter(li => li.querySelector('input').checked).length;
+      av.querySelector('.pc-barra').style.setProperty('--p', n / items.length);
+      av.querySelector('span').textContent = `${n} de ${items.length}`;
+    };
+    items.forEach((li, k) => {
+      li.innerHTML = `<label><input type="checkbox"><span class="pc-t">${li.innerHTML}</span></label>`;
+      const cb = li.querySelector('input'); cb.checked = !!st[k];
+      cb.addEventListener('change', () => { st = items.map(x => x.querySelector('input').checked); try { localStorage.setItem(KEYC, JSON.stringify(st)); } catch {} pintar(); });
+    });
+    pintar();
+  });
+  // Capa fija: un solo logo fuera de las láminas (no se anima). data-logo = versión para fondo claro;
+  // data-logo-oscuro = versión para fondo oscuro (si falta, la primera se invierte a blanco).
+  const logoSrc = stage.dataset.logo;
+  if (logoSrc) {
+    const L = document.createElement('div'); L.className = 'logo-fijo'; L.setAttribute('aria-hidden', 'true');
+    if (stage.dataset.logoPos) L.dataset.pos = stage.dataset.logoPos;
+    if (stage.dataset.logoAlto) L.style.setProperty('--logo-h', stage.dataset.logoAlto + 'px');
+    const claro = Object.assign(new Image(), { src: logoSrc, alt: '' });
+    const oscuro = Object.assign(new Image(), { src: stage.dataset.logoOscuro || logoSrc, alt: '' });
+    if (!stage.dataset.logoOscuro) oscuro.className = 'inv-auto';
+    L.append(claro, oscuro); stage.append(L);
+    const lumi = c => { const m = (c.match(/[\d.]+/g) || [255, 255, 255]).map(Number); return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255; };
+    window.__logoFijo = () => {
+      const sl = stage.querySelector(':scope > .slide.on') || slides[0], oscuroFondo = lumi(getComputedStyle(sl).backgroundColor) < .5;
+      claro.hidden = oscuroFondo; oscuro.hidden = !oscuroFondo;
+      L.style.visibility = sl.hasAttribute('data-sin-logo') ? 'hidden' : '';
+      const w = (oscuroFondo ? oscuro : claro).getBoundingClientRect().width / (stage.getBoundingClientRect().width / 1920 || 1);
+      stage.style.setProperty('--logo-w', Math.round(w || 0) + 'px');
+    };
+    [claro, oscuro].forEach(im => im.addEventListener('load', () => window.__logoFijo()));
+    new MutationObserver(() => window.__logoFijo()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    // Al imprimir, el logo se repite en cada lámina (la capa fija no se repite entre páginas)
+    addEventListener('beforeprint', () => slides.filter(sl => !sl.hasAttribute('data-sin-logo')).forEach(sl => { const c = L.cloneNode(true); c.classList.add('logo-print'); c.style.display = 'flex'; c.style.visibility = 'visible'; sl.append(c); window.__logoFijo(); const osc = lumi(getComputedStyle(sl).backgroundColor) < .5; c.children[0].hidden = osc; c.children[1].hidden = !osc; }));
+    addEventListener('afterprint', () => stage.querySelectorAll('.logo-print').forEach(x => x.remove()));
+  }
+
+  // Escala el lienzo 1920×1080 a la ventana
+  const fit = () => { const vp = document.getElementById('viewport'); stage.style.transform = `translate(-50%, -50%) scale(${Math.min(vp.clientWidth / 1920, vp.clientHeight / 1080)})`; };
+  addEventListener('resize', fit); fit();
+
+  // Pasos de una lámina: los data-step y, si trae un video con data-tramo, un paso por tramo
+  const stepsOf = sl => {
+    const v = [...sl.querySelectorAll('[data-step]')].map(e => +e.dataset.step);
+    sl.querySelectorAll('video[data-tramo]').forEach(m => { for (let k = 1; k <= m.dataset.tramo.split(',').length; k++) v.push(k); });
+    return [...new Set(v)].sort((a, b) => a - b);
+  };
+  const avisaPaso = () => dispatchEvent(new CustomEvent('paso', { detail: { i, step } }));
+  const setStep = (sl, n) => sl.querySelectorAll('[data-step]').forEach(e => e.classList.toggle('shown', +e.dataset.step <= n));
+  let i = 0, step = 0;
+
+  // Piezas que viajan entre láminas (data-k)
+  const travel = (from, to) => {
+    if (reduce || estatico || !from) return;
+    const scale = to.getBoundingClientRect().width / 1920 || 1;
+    to.querySelectorAll('[data-k]').forEach(el => {
+      const old = from.querySelector(`[data-k="${el.dataset.k}"]`); if (!old) return;
+      const a = old.getBoundingClientRect(), b = el.getBoundingClientRect(); if (!a.width || !b.width) return;
+      el.animate([{ transformOrigin: '0 0', transform: `translate(${(a.left - b.left) / scale}px, ${(a.top - b.top) / scale}px) scale(${a.width / b.width}, ${a.height / b.height})` },
+                  { transformOrigin: '0 0', transform: 'none' }], { duration: 700, easing: 'cubic-bezier(.65,0,.35,1)' });
+    });
+  };
+  const show = (n, s = 0, from = null) => {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    const sl = slides[i];
+    slides.forEach((x, k) => x.classList.toggle('on', k === i));
+    const st = stepsOf(sl);
+    step = s === 'end' ? (st.at(-1) || 0) : s;
+    setStep(sl, estatico ? Infinity : step);
+    travel(from, sl);
+    countUp(sl);
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    history.replaceState(null, '', `${location.pathname}${location.search}#${sl.dataset.id || i + 1}`);
+    if (window.__logoFijo) window.__logoFijo();
+    dispatchEvent(new CustomEvent('lamina', { detail: { i, s } }));
+  };
+  const next = () => { const sl = slides[i], nxt = stepsOf(sl).find(k => k > step); if (nxt !== undefined && !estatico) { step = nxt; setStep(sl, step); avisaPaso(); } else if (i < slides.length - 1) show(i + 1, 0, sl); };
+  const prev = () => { const sl = slides[i], prv = [...stepsOf(sl)].reverse().find(k => k < step); if (step > 0 && !estatico) { step = prv ?? 0; setStep(sl, step); avisaPaso(); } else if (i > 0) show(i - 1, 'end', sl); };
+
+  addEventListener('keydown', e => {
+    if (e.target.closest?.('input,textarea,select,[contenteditable]')) return;
+    if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); next(); }
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') show(0, 0);
+    else if (e.key === 'End') show(slides.length - 1, 'end');
+    else if (e.key === 'f' || e.key === 'F') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.();
+    else if (e.key === 't' || e.key === 'T') document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  });
+  // Clics y deslizar en fase normal (no en captura): así las herramientas que anotan sobre la página
+  // reciben el clic primero y la lámina no cambia. Si la guía está activa (.con-guia), ella maneja la navegación.
+  const UI = ['a', 'button', 'input', 'select', 'textarea', '[data-interactivo]', '.nar-ui', '.nar-barra', '.nar-prev'].join(',');
+  const ajeno = e => e.defaultPrevented || document.documentElement.classList.contains('con-guia') || e.target.closest?.(UI);
+  addEventListener('click', e => { if (ajeno(e)) return; (e.clientX > innerWidth / 3 ? next : prev)(); });
+  let tx = null;
+  addEventListener('touchstart', e => { tx = ajeno(e) ? null : e.touches[0].clientX; }, { passive: true });
+  addEventListener('touchend', e => { if (tx === null || e.defaultPrevented) return; const dx = e.changedTouches[0].clientX - tx; tx = null; if (Math.abs(dx) > 40) (dx < 0 ? next : prev)(); });
+
+  // Enlaces a una lámina: #id (su data-id, estable aunque se reordenen) o #número; conviven con ?estatico
+  const porHash = () => {
+    const h = decodeURIComponent(location.hash.slice(1)).split(/[?&]/)[0]; if (!h) return null;
+    const k = slides.findIndex(x => x.dataset.id === h);
+    if (k >= 0) return k;
+    return /^\d+$/.test(h) && +h >= 1 && +h <= slides.length ? +h - 1 : null;
+  };
+  addEventListener('hashchange', () => { const k = porHash(); if (k !== null && k !== i) show(k, 0, slides[i]); });
+  show(porHash() ?? 0, estatico ? 'end' : 0);
+  // Para la guía (narrador, resaltados y opciones): ver el script siguiente
+  window.__deck = { show, next, prev, count: slides.length, slides, countUp, stepsOf, ids: slides.map(x => x.dataset.id || null),
+    get i() { return i; }, get step() { return step; }, paso: n => { step = n; setStep(slides[i], n); avisaPaso(); } };
+})();
+</script>
+
+<script>
+/* >>> comentar.js (copia de assets/comentar.js: si cambias uno, copia el otro) */
+/* ===================== MODO COMENTAR (comentar.js) =====================
+   Módulo autocontenido, sin dependencias: se pega entero dentro de un <script> de la plantilla (informe o deck).
+   Quien lee el documento deja notas ancladas a lo que ve; las copia como Markdown y se las pasa a quien lo hizo.
+
+   Uso del lector: tecla C (o el botón "Comentar") prende el modo; un clic sobre cualquier cosa abre la nota
+   (en el deck, el clic NO cambia de lámina ni sigue enlaces mientras el modo está prendido). Esc sale.
+   Las notas se guardan en el navegador (localStorage, una clave por documento) y se vuelven a ubicar al cargar.
+
+   Para la plantilla:
+   · window.__comentar.abrir() / cerrar() / alternar()  → prender o apagar el modo.
+   · window.__comentar.montarEn(panel, {cerrar})        → agrega "Comentar" y "Ver comentarios" a un panel de
+     opciones ya armado (copia las clases del primer botón role="switch" del panel). Sin panel, el módulo
+     dibuja su propio botón flotante abajo a la izquierda (no en un deck: allí solo la tecla C).
+   · window.__comentar.ignorar('.mi-ui')                → clases de UI ajena que nunca se comentan.
+   · Lee window.__deck (slides, i, show) si existe: guarda lámina y título; si no, sección y su <h2>.
+   · Evento document 'comentar:modo' {detail:{activo}} por si la plantilla quiere pausar algo.
+   · Invisible al imprimir y con ?estatico (ahí expone un objeto inerte). Respeta e.defaultPrevented y .nar-ui. */
+(() => {
+  'use strict';
+  if (window.__comentar) return;
+  const raiz = document.documentElement;
+  if (new URLSearchParams(location.search).has('estatico')) {
+    window.__comentar = { inerte: true, activo: false, abrir() {}, cerrar() {}, alternar() {}, montarEn() {}, ignorar() {}, notas: () => [], markdown: () => '' };
+    return;
+  }
+
+  const ESTILO = `
+.cm-capa{position:absolute;left:0;top:0;width:0;height:0;z-index:8900;pointer-events:none;display:none}
+html.cm-ver .cm-capa{display:block}
+.cm-pin{all:unset;box-sizing:border-box;position:absolute;width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;display:grid;place-items:center;pointer-events:auto;cursor:pointer;
+  background:var(--accent,#c9f25a);color:var(--bg,#111);font:600 12px/1 var(--mono,ui-monospace,Menlo,monospace);box-shadow:0 0 0 2px var(--bg,#111),0 4px 14px #0007;transition:transform .15s}
+.cm-pin:hover,.cm-pin:focus-visible{transform:scale(1.18)}
+.cm-pin:focus-visible{outline:2px solid var(--fg,#fff);outline-offset:3px}
+.cm-pin.cm-sel{transform:scale(1.25);box-shadow:0 0 0 2px var(--bg,#111),0 0 0 4px var(--accent,#c9f25a)}
+.cm-hover{position:absolute;z-index:8800;pointer-events:none;display:none;border:2px dashed var(--accent,#c9f25a);border-radius:var(--r,4px);background:color-mix(in oklab,var(--accent,#c9f25a) 12%,transparent)}
+html.cm-on .cm-hover.cm-v{display:block}
+.cm-hover.cm-flash{display:block;border-style:solid;animation:cm-fl 1.7s ease-out forwards}
+@keyframes cm-fl{0%,60%{opacity:1}100%{opacity:0}}
+html.cm-on body :not(.cm-ui):not(.cm-ui *){cursor:crosshair!important}
+.cm-ui,.cm-ui *{box-sizing:border-box}
+.cm-ui{font:400 14px/1.45 var(--sans,system-ui,-apple-system,"Segoe UI",sans-serif);color:var(--fg,#f1f1f1);letter-spacing:0;text-transform:none;text-align:left}
+.cm-ui button{font:inherit;color:inherit}
+.cm-btn{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;padding:9px 12px;border-radius:var(--r,4px);
+  border:1px solid color-mix(in oklab,currentColor 38%,transparent);font:500 12.5px/1 var(--sans,system-ui,sans-serif);color:inherit}
+.cm-btn:hover{background:color-mix(in oklab,currentColor 12%,transparent)}
+.cm-btn:focus-visible{outline:2px solid var(--accent,#c9f25a);outline-offset:2px}
+.cm-btn.cm-p{background:var(--accent,#c9f25a);border-color:var(--accent,#c9f25a);color:var(--bg,#111)}
+.cm-btn.cm-p:hover{filter:brightness(1.08)}
+.cm-btn.cm-t{border-color:transparent;padding:6px 8px;font-size:12px;color:var(--soft,#bbb)}
+.cm-btn.cm-t:hover{color:var(--fg,#fff)}
+.cm-btn[hidden]{display:none}
+.cm-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cm-lanz{position:fixed;left:16px;bottom:16px;z-index:9000;display:flex;gap:6px;color:var(--fg,#f1f1f1)}
+.cm-lanz .cm-btn{background:var(--bg,#111);border-color:var(--off,rgba(255,255,255,.28));box-shadow:0 10px 30px -14px #000a;padding:11px 14px}
+html.cm-on .cm-lanz{display:none}
+.cm-barra{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9000;display:none;align-items:center;gap:6px;padding:6px 6px 6px 16px;max-width:calc(100vw - 24px);
+  background:var(--fg,#f1f1f1);color:var(--bg,#111);border-radius:var(--r,4px);box-shadow:0 14px 40px -12px #000a}
+html.cm-on .cm-barra{display:flex}
+.cm-barra b{font:500 11px/1.3 var(--mono,ui-monospace,monospace);letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.cm-barra span{font-size:13px;opacity:.75;margin-right:6px}
+.cm-barra i{width:8px;height:8px;border-radius:50%;background:var(--accent,#c9f25a);box-shadow:0 0 0 2px color-mix(in oklab,var(--bg,#111) 40%,transparent);flex:none}
+.cm-aviso{position:fixed;left:50%;bottom:76px;transform:translate(-50%,8px);z-index:9100;padding:8px 14px;border-radius:var(--r,4px);background:var(--bg,#111);color:var(--fg,#fff);
+  border:1px solid var(--off,rgba(255,255,255,.3));font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:calc(100vw - 24px)}
+.cm-aviso.cm-v{opacity:1;transform:translate(-50%,0)}
+.cm-ed{position:fixed;z-index:9100;width:min(340px,calc(100vw - 24px));display:none;padding:14px;border-radius:var(--r,4px);background:var(--bg,#111);color:var(--fg,#f1f1f1);
+  border:1px solid var(--off,rgba(255,255,255,.3));box-shadow:0 24px 60px -16px #000c}
+.cm-ed.cm-v{display:block}
+.cm-ed .cm-q{font:500 11px/1.5 var(--mono,ui-monospace,monospace);letter-spacing:.06em;color:var(--faint,#999);margin:0 0 8px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
+.cm-ed textarea{display:block;width:100%;min-height:84px;resize:vertical;padding:9px 10px;border:1px solid var(--off,rgba(255,255,255,.3));border-radius:var(--r,4px);background:transparent;color:inherit;font:400 14px/1.5 var(--sans,system-ui,sans-serif);outline:0}
+.cm-ed textarea:focus{border-color:var(--accent,#c9f25a)}
+.cm-ed .cm-fila{display:flex;gap:6px;margin-top:10px;align-items:center}
+.cm-ed .cm-fila .cm-sp{flex:1}
+.cm-ed small{display:block;color:var(--faint,#999);font-size:11.5px;margin-top:8px}
+.cm-lista{position:fixed;top:0;right:0;bottom:0;z-index:9050;width:min(390px,100vw);display:flex;flex-direction:column;background:var(--bg,#111);color:var(--fg,#f1f1f1);border-left:1px solid var(--line,rgba(255,255,255,.15));
+  box-shadow:-30px 0 80px #0005;transform:translateX(102%);visibility:hidden;transition:transform .35s cubic-bezier(.22,1,.36,1),visibility 0s .35s}
+html.cm-lis .cm-lista{transform:none;visibility:visible;transition:transform .35s cubic-bezier(.22,1,.36,1)}
+.cm-lista header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:18px 18px 12px}
+.cm-lista h2{margin:0;font:500 11px/1.4 var(--mono,ui-monospace,monospace);letter-spacing:.14em;text-transform:uppercase;color:var(--faint,#999)}
+.cm-lista ol{list-style:none;margin:0;padding:0 12px;overflow:auto;flex:1;overscroll-behavior:contain}
+.cm-lista li{display:grid;grid-template-columns:28px 1fr;gap:10px;padding:12px 6px;border-top:1px solid var(--line,rgba(255,255,255,.15))}
+.cm-lista li>b{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent,#c9f25a);color:var(--bg,#111);font:600 12px/1 var(--mono,ui-monospace,monospace)}
+.cm-lista li.cm-huerfana>b{background:transparent;color:var(--faint,#999);border:1px dashed var(--off,rgba(255,255,255,.3))}
+.cm-lista .cm-lu{font:500 11px/1.5 var(--mono,ui-monospace,monospace);letter-spacing:.06em;text-transform:uppercase;color:var(--faint,#999)}
+.cm-lista .cm-lq{font-size:12.5px;color:var(--soft,#bbb);font-style:italic;margin:2px 0 4px;word-break:break-word}
+.cm-lista .cm-ln{white-space:pre-wrap;word-break:break-word}
+.cm-lista .cm-la{display:flex;gap:2px;margin:4px 0 0 -8px}
+.cm-lista .cm-vacio{padding:24px 18px;color:var(--soft,#bbb);font-size:13.5px;border:0}
+.cm-lista footer{display:flex;flex-wrap:wrap;gap:6px;padding:12px 18px 18px;border-top:1px solid var(--line,rgba(255,255,255,.15))}
+.cm-lista footer .cm-btn{flex:1 1 auto}
+.cm-op{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 8px;cursor:pointer}
+@media (max-width:600px){
+.cm-lanz .cm-btn{font-size:0;gap:0;padding:11px}
+  .cm-ed{left:8px!important;right:8px;top:auto!important;bottom:8px;width:auto}
+  .cm-barra{padding-left:12px;bottom:72px}.cm-barra span{display:none}.cm-aviso{bottom:132px}
+  .cm-lanz .cm-btn{padding:12px 14px}
+}
+@media (prefers-reduced-motion:reduce){.cm-lista,.cm-aviso,.cm-pin{transition:none}.cm-hover.cm-flash{animation:none}}
+@media print{.cm-ui,.cm-capa,.cm-hover,.cm-lanz,.cm-barra,.cm-lista,.cm-ed,.cm-aviso{display:none!important}}
+`;
+
+  // ---------- utilidades ----------
+  const h = (tag, props = {}, ...hijos) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (v == null || v === false) continue;
+      if (k === 'class') e.className = v; else if (k === 'text') e.textContent = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v === true ? '' : v);
+    }
+    hijos.flat().forEach(c => c != null && e.append(c));
+    return e;
+  };
+  const svgIcono = d => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('aria-hidden', 'true'); const p = document.createElementNS(s.namespaceURI, 'path'); p.setAttribute('d', d); s.append(p); return s; };
+  const ICONO = 'M21 12a8 8 0 0 1-11.6 7.1L3 20.5l1.6-4.9A8 8 0 1 1 21 12z';
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const IGN0 = '.cm-ui,.nar-ui,.nar-barra,.nar-prev,.nar-orilla' ;
+  let ignorarSel = IGN0;
+  const ignorado = t => !!t.closest?.(ignorarSel);
+  const escribiendo = e => { const t = e.composedPath?.()[0] || e.target; return !!(t && (t.isContentEditable || t.closest?.('input,textarea,select,[contenteditable]'))); };
+
+  // ---------- almacenamiento (una clave por documento) ----------
+  const CLAVE = 'comentarios:' + location.pathname;
+  let S = { notas: [] };
+  const leer = () => {
+    try {
+      const j = JSON.parse(localStorage.getItem(CLAVE) || 'null');
+      S = { notas: Array.isArray(j?.notas) ? j.notas.filter(n => n && typeof n.nota === 'string') : [] };
+    } catch (e) { /* sin almacenamiento: las notas viven en memoria */ }
+  };
+  const guardar = () => {
+    try { localStorage.setItem(CLAVE, JSON.stringify(S, (k, v) => k[0] === '_' ? undefined : v)); } catch (e) { /* idem */ }
+  };
+
+  // ---------- dónde está algo: unidad (lámina o sección), selector estable y extracto ----------
+  const tituloDe = nodo => norm(nodo?.dataset?.titulo || nodo?.querySelector?.('h1,h2,[data-k=titulo]')?.textContent);
+  const unidadDe = el => {
+    const D = window.__deck;
+    if (D?.slides) {
+      let n = D.slides.indexOf(el.closest('.slide')); if (n < 0) n = D.i ?? 0;
+      return { tipo: 'Lámina', n: n + 1, titulo: tituloDe(D.slides[n]) };
+    }
+    const secs = [...document.querySelectorAll('main > section')];
+    const s = el.closest('main > section');
+    if (s) return { tipo: 'Sección', n: secs.indexOf(s) + 1, titulo: norm(s.querySelector('h2')?.textContent) };
+    return { tipo: '', n: 0, titulo: '' };
+  };
+  const pasoDe = el => { const s = el.closest?.('[data-step]'); const p = s ? parseInt(s.dataset.step, 10) : 0; return p > 0 ? p : 0; };
+  const unico = sel => { try { return document.querySelectorAll(sel).length === 1; } catch (e) { return false; } };
+  const selectorDe = el => {
+    const partes = [];
+    let n = el, ancla = false;
+    while (n && n.nodeType === 1 && n !== document.body && n !== document.documentElement) {
+      if (n.id) { const s = '#' + CSS.escape(n.id); if (unico(s)) { partes.unshift(s); ancla = true; break; } }
+      const di = n.getAttribute('data-id');
+      if (di) { const s = `[data-id="${di.replace(/"/g, '\\"')}"]`; if (unico(s)) { partes.unshift(s); ancla = true; break; } }
+      const p = n.parentElement; if (!p) break;
+      partes.unshift(`${n.localName}:nth-child(${[...p.children].indexOf(n) + 1})`);
+      n = p;
+    }
+    return (ancla ? '' : 'body > ') + partes.join(' > ');
+  };
+  const textoDe = el => {
+    const dir = el.getAttribute?.('aria-label') || el.getAttribute?.('alt') || '';
+    if (el instanceof SVGElement || el.localName === 'img') return norm(dir || el.querySelector?.('title')?.textContent || '');
+    return norm(el.innerText ?? el.textContent) || norm(dir || el.querySelector?.('[aria-label]')?.getAttribute('aria-label') || el.querySelector?.('img[alt]')?.alt);
+  };
+  const extractoDe = el => {
+    const t = textoDe(el).replace(/"/g, "'");
+    if (t.length <= 70) return t;
+    const c = t.slice(0, 70), k = c.lastIndexOf(' ');
+    return (k > 40 ? c.slice(0, k) : c) + '…';
+  };
+  const buscarPorTexto = n => {
+    const ext = (n.extracto || '').replace(/…$/, '');
+    if (ext.length < 6) return null;
+    let mejor = null, mejorLen = Infinity;
+    for (const e of document.body.querySelectorAll('*')) {
+      if (e.closest('.cm-ui,script,style')) continue;
+      const t = textoDe(e);
+      if (t.replace(/"/g, "'").startsWith(ext) && t.length < mejorLen) { mejor = e; mejorLen = t.length; }
+    }
+    return mejor;
+  };
+  const resolver = n => {
+    if (n._el?.isConnected) return n._el;
+    let e = null;
+    try { e = document.querySelector(n.sel); } catch (err) { /* selector roto */ }
+    if (e && n.extracto && !textoDe(e).replace(/"/g, "'").startsWith(n.extracto.replace(/…$/, '').slice(0, 24))) e = buscarPorTexto(n) || e;
+    if (!e) e = buscarPorTexto(n);
+    return (n._el = e);
+  };
+  const visible = el => {
+    if (!el?.isConnected) return false;
+    const r = el.getBoundingClientRect(); if (!r.width && !r.height) return false;
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+    }
+    return true;
+  };
+
+  // ---------- notas ----------
+  const ordenadas = () => [...S.notas].sort((a, b) => (a.unidad?.n || 0) - (b.unidad?.n || 0) || a.t - b.t);
+  const etiqueta = n => {
+    const u = n.unidad || {};
+    const base = u.tipo ? `${u.tipo} ${u.n}${n.paso ? ` (paso ${n.paso})` : ''}` : 'Inicio';
+    return [base, u.titulo].filter(Boolean).join(' · ');
+  };
+  const markdown = () => {
+    const l = ordenadas();
+    if (!l.length) return '';
+    const cab = `Comentarios sobre «${norm(document.title) || 'este documento'}» (${l.length}):`;
+    return cab + '\n' + l.map(n => `- ${etiqueta(n)}${n.extracto ? ` · "${n.extracto}"` : ''}: ${n.nota.replace(/\s*\n\s*/g, ' / ')}`).join('\n') + '\n';
+  };
+  const nombreArchivo = () => ((location.pathname.split('/').pop() || 'documento').replace(/\.[a-z0-9]+$/i, '') || 'documento') + '.comentarios.md';
+
+  // ---------- interfaz ----------
+  let activo = false, listaAbierta = false, edSt = null, conPanel = false, construida = false;
+  let capa, hover, barra, lista, ed, edTA, edQ, edBorrar, aviso, lanz, ul, cuentaB, cuentaL, entrada, entradaLista, avisoT = 0;
+
+  const decir = txt => {
+    if (!aviso) return;
+    aviso.textContent = txt; aviso.classList.add('cm-v');
+    clearTimeout(avisoT); avisoT = setTimeout(() => aviso.classList.remove('cm-v'), 2200);
+  };
+  const cuenta = () => S.notas.length;
+
+  const ubicar = () => {
+    if (!construida || !raiz.classList.contains('cm-ver')) return;
+    const sx = scrollX, sy = scrollY, ancho = raiz.scrollWidth;
+    ordenadas().forEach((n, k) => {
+      const pin = n._pin; if (!pin) return;
+      const el = resolver(n);
+      if (!el || !visible(el)) { pin.hidden = true; return; }
+      const r = el.getBoundingClientRect();
+      pin.hidden = false;
+      pin.style.left = clamp(r.left + sx + (n.fx ?? .5) * r.width, 14, Math.max(14, ancho - 14)) + 'px';
+      pin.style.top = Math.max(14, r.top + sy + (n.fy ?? .5) * r.height) + 'px';
+    });
+  };
+  let raf = 0;
+  const programar = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; ubicar(); }); };
+
+  const actualizarVista = () => {
+    const ver = activo || listaAbierta;
+    raiz.classList.toggle('cm-on', activo);
+    raiz.classList.toggle('cm-lis', listaAbierta);
+    raiz.classList.toggle('cm-ver', ver);
+    entrada?.setAttribute('aria-checked', String(activo));
+    const c = cuenta();
+    if (cuentaB) cuentaB.textContent = c ? `Lista (${c})` : 'Lista';
+    if (cuentaL) cuentaL.textContent = c ? `Notas · ${c}` : '';
+    if (cuentaL) cuentaL.hidden = !c;
+    const sm = entrada?.querySelector('small'); if (sm) sm.textContent = activo ? 'Prendido: un clic en cualquier cosa deja una nota' : 'Un clic en cualquier cosa deja una nota';
+    const sm2 = entradaLista?.querySelector('small'); if (sm2) sm2.textContent = c ? `${c} ${c === 1 ? 'nota' : 'notas'}` : 'Aún no hay';
+    if (ver) programar();
+  };
+
+  const render = () => {
+    if (!construida) return;
+    capa.querySelectorAll('.cm-pin').forEach(p => p.remove());
+    const l = ordenadas();
+    l.forEach((n, k) => {
+      n._pin = h('button', { class: 'cm-pin', type: 'button', text: String(k + 1), title: n.nota, 'aria-label': `Nota ${k + 1}: ${n.nota}`, onclick: ev => { ev.stopPropagation(); editar(n); } });
+      capa.append(n._pin);
+    });
+    ul.replaceChildren(...(l.length ? l.map((n, k) => {
+      const huerfana = !resolver(n);
+      return h('li', { class: huerfana ? 'cm-huerfana' : '' },
+        h('b', { text: String(k + 1) }),
+        h('div', {},
+          h('div', { class: 'cm-lu', text: etiqueta(n) + (huerfana ? ' · ya no está' : '') }),
+          n.extracto ? h('div', { class: 'cm-lq', text: `"${n.extracto}"` }) : null,
+          h('div', { class: 'cm-ln', text: n.nota }),
+          h('div', { class: 'cm-la' },
+            h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Ir', onclick: () => ir(n) }),
+            h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Editar', onclick: () => editar(n) }),
+            h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Borrar', onclick: () => borrar(n) }))));
+    }) : [h('li', { class: 'cm-vacio', text: 'Aún no hay comentarios. Prende el modo comentar (tecla C) y haz clic en lo que quieras señalar.' })]));
+    actualizarVista();
+  };
+
+  const ir = n => {
+    const D = window.__deck, el = resolver(n);
+    if (D?.show && n.unidad?.tipo === 'Lámina') D.show(n.unidad.n - 1, n.paso || 0);
+    if (!el) { decir('Ese elemento ya no está en el documento'); return; }
+    el.closest('details')?.setAttribute('open', '');
+    if (!D) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (window.innerWidth < 700) cerrarLista();
+    setTimeout(() => {
+      const r = el.getBoundingClientRect();
+      Object.assign(hover.style, { left: r.left + scrollX + 'px', top: r.top + scrollY + 'px', width: r.width + 'px', height: r.height + 'px' });
+      hover.classList.remove('cm-flash'); void hover.offsetWidth; hover.classList.add('cm-flash');
+      programar();
+    }, D ? 520 : 450);
+  };
+
+  const borrar = n => { S.notas = S.notas.filter(x => x !== n); guardar(); if (edSt?.nota === n) cerrarEditor(false); render(); };
+
+  const posicionarEd = (x, y) => {
+    const w = Math.min(340, innerWidth - 24);
+    ed.style.left = clamp(x + 14, 12, innerWidth - w - 12) + 'px';
+    ed.style.top = clamp(y + 14, 12, Math.max(12, innerHeight - 250)) + 'px';
+  };
+  const abrirEditor = st => {
+    cerrarEditor(true);
+    edSt = st;
+    edQ.textContent = st.nota ? (st.nota.extracto ? `"${st.nota.extracto}"` : etiqueta(st.nota)) : (extractoDe(st.el) ? `"${extractoDe(st.el)}"` : 'Esta parte del documento');
+    edTA.value = st.nota?.nota || '';
+    edBorrar.hidden = !st.nota;
+    ed.classList.add('cm-v');
+    posicionarEd(st.x, st.y);
+    document.querySelectorAll('.cm-pin.cm-sel').forEach(p => p.classList.remove('cm-sel'));
+    st.nota?._pin?.classList.add('cm-sel');
+    setTimeout(() => edTA.focus(), 0);
+  };
+  const cerrarEditor = guardarTexto => {
+    if (!edSt) return;
+    const st = edSt, txt = edTA.value.trim();
+    edSt = null; ed.classList.remove('cm-v');
+    document.querySelectorAll('.cm-pin.cm-sel').forEach(p => p.classList.remove('cm-sel'));
+    if (!guardarTexto) return;
+    if (st.nota) { if (!txt) S.notas = S.notas.filter(x => x !== st.nota); else if (txt !== st.nota.nota) st.nota.nota = txt; else return; }
+    else if (txt) {
+      const r = st.el.getBoundingClientRect(), u = unidadDe(st.el);
+      S.notas.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t: Date.now(), unidad: u, paso: pasoDe(st.el),
+        sel: selectorDe(st.el), extracto: extractoDe(st.el),
+        fx: r.width ? +clamp((st.x - r.left) / r.width, 0, 1).toFixed(3) : .5, fy: r.height ? +clamp((st.y - r.top) / r.height, 0, 1).toFixed(3) : .5,
+        nota: txt, _el: st.el,
+      });
+    } else return;
+    guardar(); render();
+  };
+  const editar = n => {
+    const p = n._pin?.getBoundingClientRect();
+    abrirEditor({ nota: n, x: p && !n._pin.hidden ? p.left : innerWidth - 400, y: p && !n._pin.hidden ? p.top : 120 });
+  };
+
+  const copiar = async () => {
+    const md = markdown();
+    if (!md) { decir('Aún no hay comentarios'); return false; }
+    let ok = false;
+    try { await navigator.clipboard.writeText(md); ok = true; } catch (e) { /* cae al plan B */ }
+    if (!ok) {
+      const t = h('textarea', { style: 'position:fixed;left:-9999px;top:0', 'aria-hidden': 'true' }); t.value = md; barra.append(t); t.select();
+      try { ok = document.execCommand('copy'); } catch (e) { /* nada */ }
+      t.remove();
+    }
+    decir(ok ? `Copiados ${cuenta()} ${cuenta() === 1 ? 'comentario' : 'comentarios'}. Pégalos en el chat` : 'No pude copiar: usa "Bajar .comentarios.md"');
+    return ok;
+  };
+  const bajar = () => {
+    const md = markdown();
+    if (!md) { decir('Aún no hay comentarios'); return; }
+    const a = h('a', { href: URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' })), download: nombreArchivo() });
+    barra.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    decir(`Bajando ${nombreArchivo()}`);
+  };
+  let confirmarBorrado = 0;
+  const borrarTodo = ev => {
+    if (!cuenta()) return;
+    const b = ev.currentTarget;
+    if (!confirmarBorrado) { b.textContent = '¿Seguro? Otro clic'; confirmarBorrado = setTimeout(() => { confirmarBorrado = 0; b.textContent = 'Borrar todo'; }, 3000); return; }
+    clearTimeout(confirmarBorrado); confirmarBorrado = 0; b.textContent = 'Borrar todo';
+    S.notas = []; guardar(); render(); decir('Comentarios borrados');
+  };
+
+  const activar = v => {
+    v = !!v; if (v === activo) return;
+    activo = v;
+    if (!v) { cerrarEditor(true); hover.classList.remove('cm-v'); }
+    else if (!construida) construir();
+    actualizarVista();
+    if (v) decir('Modo comentar: haz clic en lo que quieras comentar');
+    document.dispatchEvent(new CustomEvent('comentar:modo', { detail: { activo } }));
+  };
+  const abrirLista = v => { listaAbierta = v !== false; if (!listaAbierta) cerrarEditor(true); actualizarVista(); if (listaAbierta) render(); };
+  const cerrarLista = () => abrirLista(false);
+
+  const construir = () => {
+    if (construida || !document.body) return;
+    const st = h('style', { id: 'cm-css' }); st.textContent = ESTILO; document.head.append(st);
+    capa = h('div', { class: 'cm-capa cm-ui' });
+    hover = h('div', { class: 'cm-hover' });
+    aviso = h('div', { class: 'cm-aviso cm-ui', role: 'status', 'aria-live': 'polite' });
+    cuentaB = h('button', { class: 'cm-btn', type: 'button', text: 'Lista', onclick: () => abrirLista(!listaAbierta) });
+    barra = h('div', { class: 'cm-barra cm-ui' }, h('i'), h('b', { text: 'Modo comentar' }), h('span', { text: 'Haz clic en lo que quieras comentar' }), cuentaB,
+      h('button', { class: 'cm-btn', type: 'button', onclick: () => activar(false) }, 'Salir ', h('b', { text: 'C' })));
+    cuentaL = h('button', { class: 'cm-btn', type: 'button', hidden: true, onclick: () => abrirLista(true) });
+    lanz = h('div', { class: 'cm-lanz cm-ui' },
+      h('button', { class: 'cm-btn', type: 'button', 'aria-label': 'Comentar (tecla C)', onclick: () => activar(true) }, svgIcono(ICONO), 'Comentar'), cuentaL);
+    ul = h('ol');
+    lista = h('aside', { class: 'cm-lista cm-ui', 'aria-label': 'Comentarios' },
+      h('header', {}, h('h2', { text: 'Comentarios' }), h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Cerrar', onclick: cerrarLista })),
+      ul,
+      h('footer', {},
+        h('button', { class: 'cm-btn cm-p', type: 'button', text: 'Copiar comentarios', onclick: copiar }),
+        h('button', { class: 'cm-btn', type: 'button', text: 'Bajar .comentarios.md', onclick: bajar }),
+        h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Borrar todo', onclick: borrarTodo })));
+    edQ = h('p', { class: 'cm-q' });
+    edTA = h('textarea', { rows: 3, placeholder: 'Escribe tu comentario…', 'aria-label': 'Comentario' });
+    edBorrar = h('button', { class: 'cm-btn cm-t', type: 'button', text: 'Borrar', hidden: true, onclick: () => edSt?.nota && borrar(edSt.nota) });
+    ed = h('div', { class: 'cm-ed cm-ui', role: 'dialog', 'aria-label': 'Nueva nota' }, edQ, edTA,
+      h('div', { class: 'cm-fila' },
+        h('button', { class: 'cm-btn cm-p', type: 'button', text: 'Guardar', onclick: () => cerrarEditor(true) }),
+        h('button', { class: 'cm-btn', type: 'button', text: 'Cancelar', onclick: () => cerrarEditor(false) }),
+        h('span', { class: 'cm-sp' }), edBorrar),
+      h('small', { text: 'Ctrl o Cmd + Enter guarda · Esc cancela' }));
+    // Lo que ocurre dentro de nuestra interfaz no sube a la página (ni cambia la lámina, ni dispara atajos)
+    [lista, ed, barra, lanz, capa, aviso].forEach(n => ['click', 'keydown', 'keyup', 'touchstart', 'touchend', 'pointerdown'].forEach(t => n.addEventListener(t, ev => ev.stopPropagation())));
+    edTA.addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); cerrarEditor(true); } });
+    document.body.append(capa, hover, aviso, ed, lista, barra);
+    if (!conPanel && !window.__deck) document.body.append(lanz);
+    construida = true;
+    render();
+    // Mantener los pines pegados a su elemento
+    addEventListener('resize', programar);
+    addEventListener('scroll', programar, { passive: true, capture: true });
+    addEventListener('load', programar);
+    document.addEventListener('transitionend', programar, true);
+    document.addEventListener('animationend', programar, true);
+    document.fonts?.ready.then(programar);
+    new MutationObserver(ms => { if (raiz.classList.contains('cm-ver') && ms.some(m => !m.target.closest?.('.cm-ui,.cm-hover'))) programar(); })
+      .observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'open', 'hidden'] });
+    setInterval(() => { if (!document.hidden) ubicar(); }, 900);
+  };
+
+  // ---------- entradas del lector ----------
+  let seguir = 0;
+  addEventListener('mousemove', e => {
+    if (!activo || seguir) return;
+    seguir = requestAnimationFrame(() => {
+      seguir = 0;
+      const t = e.target;
+      if (!(t instanceof Element) || ignorado(t) || t === document.body || t === raiz) { hover.classList.remove('cm-v'); return; }
+      const el = t.closest('svg') || t, r = el.getBoundingClientRect();
+      Object.assign(hover.style, { left: r.left + scrollX + 'px', top: r.top + scrollY + 'px', width: r.width + 'px', height: r.height + 'px' });
+      hover.classList.remove('cm-flash'); hover.classList.add('cm-v');
+    });
+  }, { passive: true });
+
+  // El clic se toma en captura: así la lámina no cambia ni se sigue un enlace. Si otra herramienta
+  // (por ejemplo, un overlay de notas) ya lo usó (defaultPrevented) o es interfaz ajena, no se toca.
+  addEventListener('click', e => {
+    if (!activo || e.defaultPrevented || e.button) return;
+    const t = e.target;
+    if (!(t instanceof Element) || ignorado(t)) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    abrirEditor({ nota: null, el: t.closest('svg') || t, x: e.clientX, y: e.clientY });
+  }, true);
+
+  const api = window.__comentar = {
+    get activo() { return activo; },
+    get tecla() { return tecla; }, set tecla(v) { tecla = String(v).toLowerCase(); },
+    abrir() { activar(true); }, cerrar() { activar(false); }, alternar() { activar(!activo); },
+    lista: abrirLista, notas: () => ordenadas().map(n => ({ ...n, _el: undefined, _pin: undefined })),
+    markdown, copiar, bajar, ignorar(sel) { ignorarSel += ',' + sel; }, clave: CLAVE,
+    // Agrega las entradas al panel de opciones de la plantilla, con las clases de sus propios botones
+    montarEn(panel, opts = {}) {
+      if (!panel) return;
+      conPanel = true; lanz?.remove();
+      const modelo = panel.querySelector('button[role=switch]');
+      const clase = opts.clase || modelo?.className || 'cm-op';
+      const claseSw = opts.claseSwitch || modelo?.querySelector('i')?.className || '';
+      const titulo = panel.querySelector('h3') ? h(panel.querySelector('h3').localName, { text: 'Comentarios' }) : null;
+      entrada = h('button', { class: clase + ' cm-entrada', type: 'button', role: 'switch', 'aria-checked': String(activo) },
+        h('span', {}, 'Comentar', h('kbd', { text: 'C' }), h('small')), claseSw ? h('i', { class: claseSw }) : null);
+      entrada.addEventListener('click', () => { const a = !activo; activar(a); if (a) opts.cerrar?.(); });
+      entradaLista = h('button', { class: clase + ' cm-entrada-lista', type: 'button' }, h('span', {}, 'Ver comentarios', h('small')));
+      entradaLista.addEventListener('click', () => { abrirLista(true); opts.cerrar?.(); });
+      const nodos = [titulo, entrada, entradaLista].filter(Boolean);
+      opts.antes ? opts.antes.before(...nodos) : panel.append(...nodos);
+      actualizarVista();
+    },
+  };
+  let tecla = 'c';
+
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (edSt) { e.preventDefault(); e.stopImmediatePropagation(); cerrarEditor(false); }
+      else if (activo) { e.preventDefault(); e.stopImmediatePropagation(); activar(false); }
+      else if (listaAbierta) { e.preventDefault(); e.stopImmediatePropagation(); cerrarLista(); }
+      return;
+    }
+    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || escribiendo(e)) return;
+    if (e.key.toLowerCase() === tecla) { e.preventDefault(); e.stopImmediatePropagation(); activar(!activo); }
+  }, true);
+
+  addEventListener('storage', e => { if (e.key === CLAVE) { leer(); render(); } });
+
+  leer();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', construir); else construir();
+})();
+/* <<< comentar.js */
+</script>
+
+<script>
+/* ===================== GUÍA: narrador, resaltados, barra de progreso y opciones =====================
+   Panel de opciones: tecla O, la rueda de arriba a la derecha o el mouse en la orilla derecha.
+   - Narrador (solo si el deck trae <script id="narracion">, de scripts/narrar.py). Parte APAGADO.
+     Encendido, una voz presenta y avanza sola; cada marca del guion cae cuando se nombra.
+     "Controles del narrador": barra tipo video abajo (solo con el narrador encendido).
+     "Resaltados del narrador" (apagado por defecto): a mano, las flechas recorren lo que destaca.
+   - Presentación: barra fina de progreso bajo las láminas (encendida por defecto; sin efecto con el
+     narrador encendido), tema, color y pantalla completa. "Mantener visible la rueda".
+   - Marcas del guion (<aside class="voz">): [paso N], [foco SEL], [foco:modo SEL], [clic SEL];
+     "A | B" destaca varias piezas juntas. Modos: marco, zoom, luz, subraya (si no se dice, se elige solo). */
+addEventListener('DOMContentLoaded', () => {
+  const D = window.__deck, root = document.documentElement;
+  if (!D || root.classList.contains('estatico')) return;
+  const stage = document.getElementById('stage');
+  const nEl = document.getElementById('narracion');
+  const N = nEl ? JSON.parse(nEl.textContent) : null;
+  const conVoz = !!N, L = D.slides.map((_, k) => N?.laminas?.[k] || null);
+  const GAP_IN = 650, GAP_OUT = 900, VEL = [1, 1.25, 1.5];
+
+  // ---- Marcas: del JSON de narración o, si no hay, leídas del guion para usarlas a mano ----
+  const leerMarcas = sl => {
+    const g = sl.querySelector('aside.voz'); if (!g) return [];
+    const t = g.textContent, out = [], re = /\[(paso|foco|clic)(?::(\w+))?\s/g; let m;
+    while ((m = re.exec(t))) {
+      let j = m.index, d = 0;
+      for (; j < t.length; j++) { d += t[j] === '[' ? 1 : t[j] === ']' ? -1 : 0; if (d === 0) break; }
+      out.push({ tipo: m[1], modo: m[2] || '', arg: t.slice(m.index + m[0].length, j).trim() }); re.lastIndex = j + 1;
+    }
+    return out;
+  };
+  const GUION = D.slides.map((sl, k) => L[k]?.cues || leerMarcas(sl));
+  const hayMarcas = GUION.some(c => c.length);
+  const CUES = D.slides.map((sl, k) => {
+    const c = GUION[k];
+    // Sin guion ni voz, los pasos de la lámina (data-step) hacen de marcas
+    return c.length || L[k] ? c : D.stepsOf(sl).map(n => ({ tipo: 'paso', arg: String(n) }));
+  });
+  const tienePaso = q => CUES[q].some(c => c.tipo === 'paso');
+
+  // ---- Preferencias: las generales se recuerdan en este navegador; color y tema, por presentación ----
+  const KEY = 'deck-guia', KEYD = 'deck-guia:' + location.pathname;
+  const leer = x => { try { return JSON.parse(localStorage.getItem(x)) || {}; } catch { return {}; } };
+  const G = leer(KEY), GD = leer(KEYD);
+  const P = Object.assign({ ctlNarr: true, ctlPres: true, resaltar: false, fijar: false, voz: true, subs: true, vel: 0 }, G);
+  const guardar = (...ks) => { ks.forEach(x => G[x] = P[x]); try { localStorage.setItem(KEY, JSON.stringify(G)); } catch {} };
+  const guardarD = () => { try { localStorage.setItem(KEYD, JSON.stringify(GD)); } catch {} };
+  const HUE0 = getComputedStyle(root).getPropertyValue('--hue').trim() || '75';
+  if (GD.hue) root.style.setProperty('--hue', GD.hue);
+  if (GD.tema) root.dataset.theme = GD.tema;
+  const COLORES = [[HUE0, 'Original'], ['25', 'Rojo'], ['55', 'Naranjo'], ['85', 'Ámbar'], ['145', 'Verde'], ['195', 'Turquesa'], ['250', 'Azul'], ['295', 'Violeta'], ['340', 'Rosa']]
+    .filter((c, q, a) => q === 0 || Math.abs(+c[0] - +a[0][0]) > 12);
+  let narrador = false;   // el narrador siempre parte apagado
+
+  const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const dur = D.slides.map((_, k) => L[k] ? L[k].dur : 5 + CUES[k].length * 1.8), total = dur.reduce((a, b) => a + b, 0);
+  const titulo = k => (D.slides[k].querySelector('h1,h2')?.textContent || '').replace(/\s+/g, ' ').trim();
+  const num = k => String(k + 1).padStart(2, '0');
+  const ico = {
+    play: '<svg viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z"/></svg>',
+    pausa: '<svg viewBox="0 0 24 24"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z"/></svg>',
+    ant: '<svg viewBox="0 0 24 24"><path d="M6 5h2.5v14H6zM20 5v14L9.5 12z"/></svg>',
+    sig: '<svg viewBox="0 0 24 24"><path d="M15.5 5H18v14h-2.5zM4 5v14l10.5-7z"/></svg>',
+    voz: '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    full: '<svg viewBox="0 0 24 24"><path d="M4 4h6v2.5H6.5V10H4zm10 0h6v6h-2.5V6.5H14zM4 14h2.5v3.5H10V20H4zm13.5 0H20v6h-6v-2.5h3.5z"/></svg>',
+    rueda: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.6M12 18.9v2.6M21.5 12h-2.6M5.1 12H2.5M18.7 5.3l-1.8 1.8M7.1 16.9l-1.8 1.8M18.7 18.7l-1.8-1.8M7.1 7.1 5.3 5.3"/><circle cx="12" cy="12" r="6.6"/></svg>',
+  };
+
+  // ---- Interfaz ----
+  const mk = (tag, cls, html = '') => Object.assign(document.createElement(tag), { className: cls, innerHTML: html });
+  const ring = mk('div', 'nar-ring'), line = mk('div', 'nar-line');
+  stage.append(ring, line);
+  const sub = mk('div', 'nar-sub nar-ui');
+  const ctl = mk('div', 'nar-ctl nar-ui', `<div class="nar-prog">${dur.map((d, k) => `<i style="--w:${d}" data-q="${k}"><b></b></i>`).join('')}</div>
+    <div class="nar-row"><button class="nar-ant" aria-label="Anterior">${ico.ant}</button><button class="nar-pp" aria-label="Reproducir">${ico.play}</button><button class="nar-sig" aria-label="Siguiente">${ico.sig}</button>
+    <span class="nar-t">0:00 / ${mmss(total)}</span><span class="nar-tit"></span>
+    <button class="nar-vel" aria-label="Velocidad">1×</button><button class="nar-voz" aria-label="Voz">${ico.voz}</button><button class="nar-cc" aria-label="Subtítulos">CC</button>
+    ${root.requestFullscreen ? `<button class="nar-full" aria-label="Pantalla completa">${ico.full}</button>` : ''}<button class="nar-abre" aria-label="Opciones">${ico.rueda}</button></div>`);
+  const barra = mk('div', 'nar-barra', `<div class="nar-tramos">${D.slides.map((_, q) => `<i data-q="${q}"><b></b></i>`).join('')}</div>`);
+  const prev = mk('div', 'nar-prev', '<div class="nar-prev-c"><div class="nar-prev-l"></div></div><span class="nar-prev-t"></span>');
+  const rueda = mk('button', 'nar-rueda nar-ui', ico.rueda); rueda.ariaLabel = 'Opciones (O)';
+  const orilla = mk('div', 'nar-orilla');
+  const op = (id, txt, sm, k) => `<button class="nar-op" role="switch" data-op="${id}" data-sm="${sm || ''}"><span>${txt}${k ? `<kbd>${k}</kbd>` : ''}<small></small></span><i class="nar-sw"></i></button>`;
+  const panel = mk('aside', 'nar-panel nar-ui', `
+    ${conVoz || hayMarcas ? `<h3>Narrador</h3>
+      ${conVoz ? op('narrador', 'Narrador', `Una voz (${N.voz}) presenta y avanza sola`, 'N') + op('ctlNarr', 'Controles del narrador', 'Barra de abajo: pausa, tiempo, velocidad, voz y subtítulos', 'M') : ''}
+      ${hayMarcas ? op('resaltar', 'Resaltados del narrador', 'Al avanzar a mano, las flechas recorren lo que el narrador destaca', 'R') : ''}` : ''}
+    <h3>Presentación</h3>
+    ${op('ctlPres', 'Controles de la presentación', 'Barra fina de progreso bajo las láminas; al pasar el mouse muestra cada una', 'B')}
+    ${op('tema', 'Tema claro', '', 'T')}
+    <div class="nar-op nar-op-color" style="cursor:default"><span>Color</span></div>
+    <div class="nar-colores">${COLORES.map(([h, n]) => `<button data-hue="${h}" style="--h:${h}" title="${n}" aria-label="Color ${n}"></button>`).join('')}</div>
+    ${root.requestFullscreen ? `<button class="nar-op" data-accion="full"><span>Pantalla completa<kbd>F</kbd></span></button>` : ''}
+    <h3>Rueda</h3>
+    ${op('fijar', 'Mantener visible la rueda', 'Si no, aparece con el mouse en la orilla derecha o con la tecla O')}
+    <h3>Atajos</h3><div class="nar-keys"><kbd>← →</kbd><span>anterior o siguiente</span><kbd>Espacio</kbd><span>${conVoz ? 'pausa (con narrador) o siguiente' : 'siguiente'}</span><kbd>Inicio · Fin</kbd><span>primera o última</span><kbd>O</kbd><span>opciones</span><kbd>Esc</kbd><span>cerrar</span></div>`);
+  document.body.append(sub, ctl, barra, prev, orilla, rueda, panel);
+  window.__comentar?.montarEn(panel, { cerrar: () => root.classList.remove('panel-on') });
+  root.classList.add('con-guia');
+  const $ = s => document.querySelector(s);
+  const segs = [...ctl.querySelectorAll('.nar-prog i')], tramos = [...barra.querySelectorAll('i')];
+
+  // ---- Estado ----
+  const audio = new Audio(); audio.preload = 'auto';
+  let k = D.i, cue = 0, sonando = false, fin = false, timer = 0, raf = 0, interno = false, frase = -1, foco = null, t0 = 0, tPausa = 0;
+
+  // ---- Una sola voz a la vez ----
+  // Puede haber varias copias abiertas: pestañas, ventanas, la versión vieja y la nueva, o varias vistas de
+  // dispositivo que reflejan cada tecla y clic en todas. Solo una habla; las demás siguen
+  // sincronizadas, en silencio. Gana la que tiene el foco y, si no, la de id menor. Una copia oculta
+  // (pestaña de fondo) nunca habla: se pausa. ?mudo abre la presentación sin voz (para pruebas).
+  const YO = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const rango = () => (document.hasFocus() ? '0' : '1') + YO;
+  let cedida = false;
+  const canal = (() => { try { return new BroadcastChannel('deck-voz'); } catch { return null; } })();
+  const avisar = () => {
+    const m = { tipo: 'suena', de: YO, rango: rango() };
+    try { canal && canal.postMessage(m); } catch {}
+    try { localStorage.setItem('deck-voz', JSON.stringify({ ...m, t: Date.now() })); } catch {}
+  };
+  const recibir = m => {
+    if (!m || m.tipo !== 'suena' || m.de === YO || !sonando) return;
+    if (m.rango < rango()) { cedida = true; audio.muted = true; botones(); }
+    else avisar();
+  };
+  if (canal) canal.onmessage = e => recibir(e.data);
+  addEventListener('storage', e => { if (e.key === 'deck-voz' && e.newValue) { try { recibir(JSON.parse(e.newValue)); } catch {} } });
+  const ocultar = () => { if (sonando) pausa(); };
+  document.addEventListener('visibilitychange', () => { if (document.hidden) ocultar(); });
+  addEventListener('pagehide', () => { ocultar(); audio.pause(); audio.removeAttribute('src'); });
+  if (new URLSearchParams(location.search).has('mudo')) P.voz = false;
+  window.__voz = { get sonando() { return sonando; }, get cedida() { return cedida; }, get muda() { return audio.muted; } };
+
+  // ---- Resaltados ----
+  const MARCO = '.mbar,.srcl,.num,.rail-s,.voz,.notas';
+  const caja = ts => {
+    const S = stage.getBoundingClientRect(), sc = S.width / 1920, rs = ts.map(t => t.getBoundingClientRect());
+    const l = Math.min(...rs.map(r => r.left)), tp = Math.min(...rs.map(r => r.top)), r = Math.max(...rs.map(r => r.right)), b = Math.max(...rs.map(r => r.bottom));
+    return { left: (l - S.left) / sc, top: (tp - S.top) / sc, width: (r - l) / sc, height: (b - tp) / sc };
+  };
+  const elegirModo = ts => {
+    if (ts.some(t => t.matches('.hot,.inv,.key,.ask') || t.querySelector(':scope > .hl'))) return 'zoom';
+    if (ts.every(t => t.matches('h1,h2,h3,p,.lead,.act,.k,li:not(.card),b,span') && !t.matches('.card,.node'))) return 'subraya';
+    if (ts.length === 1 && caja(ts).width > 1920 * 0.55) return 'luz';
+    return 'marco';
+  };
+  const soltar = () => {
+    stage.querySelectorAll('.nar-dim,.nar-zoom,.nar-luz').forEach(x => { x.classList.remove('nar-dim', 'nar-zoom', 'nar-luz'); x.classList.add('nar-suelta'); });
+    ring.classList.remove('on', 'llega'); line.classList.remove('on'); foco = null;
+  };
+  const ubicar = (el, box, pad, sinTrans) => {
+    if (sinTrans) el.style.transition = 'none';
+    Object.assign(el.style, { left: box.left - pad + 'px', top: box.top - pad + 'px', width: box.width + pad * 2 + 'px', height: box.height + pad * 2 + 'px' });
+    if (sinTrans) { el.offsetWidth; el.style.transition = ''; }
+  };
+  const enfocar = (sl, arg, modo, contar = true) => {
+    const ya = ring.classList.contains('on');
+    stage.querySelectorAll('.nar-dim,.nar-zoom,.nar-luz').forEach(x => { x.classList.remove('nar-dim', 'nar-zoom', 'nar-luz'); x.classList.add('nar-suelta'); });
+    line.classList.remove('on');
+    if (arg === '-') { ring.classList.remove('on'); foco = null; return; }
+    const ts = arg.split(/\s+\|\s+/).map(s => sl.querySelector(s)).filter(Boolean); if (!ts.length) return;
+    const m = modo || elegirModo(ts);
+    foco = { sl, arg, modo: m };
+    ts.forEach(t => [...t.parentElement.children].forEach(x => { if (!ts.includes(x) && !x.matches(MARCO)) x.classList.add('nar-dim'); }));
+    ts.forEach(t => t.classList.remove('nar-suelta', 'nar-dim'));
+    if (m === 'marco') {
+      const box = caja(ts), pad = Math.max(14, Math.min(26, Math.min(box.width, box.height) * 0.08));
+      ubicar(ring, box, pad, !ya);
+      ring.classList.remove('llega'); ring.offsetWidth; ring.classList.add('on', 'llega');
+    } else {
+      ring.classList.remove('on');
+      if (m === 'zoom') ts.forEach(t => t.classList.add('nar-zoom'));
+      if (m === 'luz') ts.forEach(t => t.classList.add('nar-luz'));
+      if (m === 'subraya') { const b = caja(ts); ubicar(line, { left: b.left, top: b.top + b.height + 8, width: b.width, height: 6 }, 0, true); line.style.height = '6px'; line.offsetWidth; line.classList.add('on'); }
+    }
+    if (contar) ts.forEach(t => D.countUp(t));
+  };
+  // Línea de tiempo: la controla la guía solo si la lámina tiene marcas [paso] y hay narrador o resaltados
+  const guiada = () => narrador || P.resaltar;
+  const prepTL = q => { const sl = D.slides[q]; if (guiada() && tienePaso(q)) lineaTiempo(sl, 0); else sl.classList.remove('nar-tl'); };
+  const lineaTiempo = (sl, n) => sl.classList.add('nar-tl') || sl.querySelectorAll('.tline').forEach(tl => {
+    const sp = [...tl.children], m = sp.length;
+    sp.forEach((s, j) => s.classList.toggle('ok', j < n));
+    tl.style.setProperty('--tl', n <= 0 ? 0 : n >= m ? 1 : (n - 1) / m + 0.07);
+  });
+  const disparar = (c, rapido = false) => {
+    const sl = D.slides[k];
+    if (c.tipo === 'paso') { D.paso(+c.arg); lineaTiempo(sl, +c.arg); }
+    else if (c.tipo === 'foco') { if (guiada()) enfocar(sl, c.arg, c.modo, !rapido); }
+    else if (c.tipo === 'clic') {
+      const b = sl.querySelector(c.arg); if (!b) return;
+      b.click();
+      if (guiada()) enfocar(sl, c.arg, 'marco', false);
+      const sim = b.closest('[data-sim]');
+      if (!rapido && sim) { sim.querySelectorAll('[data-out]').forEach(x => /\d/.test(x.textContent) && x.classList.add('count')); D.countUp(sim); }
+    }
+  };
+  const reconstruir = m => { soltar(); if (tienePaso(k)) { D.paso(0); lineaTiempo(D.slides[k], 0); } for (let j = 0; j < m; j++) disparar(CUES[k][j], true); cue = m; };
+  // Lámina completa, como sin guía (todos los pasos a la vista, sin resaltados)
+  const completa = () => { soltar(); D.slides[k].classList.remove('nar-tl'); D.paso(D.stepsOf(D.slides[k]).at(-1) || 0); };
+
+  // ---- Barra fina de la presentación ----
+  const usaMarcas = q => P.resaltar && GUION[q].length > 0;
+  const pasosMano = q => usaMarcas(q) ? CUES[q].length : D.stepsOf(D.slides[q]).length;
+  const hechos = () => usaMarcas(D.i) ? cue : D.stepsOf(D.slides[D.i]).filter(n => n <= D.step).length;
+  const pintarBarra = () => tramos.forEach((t, q) => {
+    const n = pasosMano(q);
+    t.style.setProperty('--w', 1 + 0.3 * n);   // 0 pasos = 1; cada paso suma 30 %: todas se ven cómodas
+    t.style.setProperty('--p', q < D.i ? '100%' : q > D.i ? '0%' : ((hechos() + 1) / (n + 1)) * 100 + '%');
+  });
+  const ubicarBarra = () => { const S = stage.getBoundingClientRect(); Object.assign(barra.style, { left: S.left + 'px', width: S.width + 'px', top: S.bottom - 24 + 'px' }); };
+  const clones = {};
+  const miniatura = q => {
+    if (!clones[q]) {
+      const c = D.slides[q].cloneNode(true);
+      c.classList.add('on'); c.classList.remove('nar-tl');
+      c.querySelectorAll('.voz,.notas').forEach(x => x.remove());
+      c.querySelectorAll('.nar-dim,.nar-zoom,.nar-luz,.nar-suelta').forEach(x => x.classList.remove('nar-dim', 'nar-zoom', 'nar-luz', 'nar-suelta'));
+      c.querySelectorAll('[data-step]').forEach(x => x.classList.add('shown'));
+      clones[q] = c;
+    }
+    return clones[q];
+  };
+  // Miniatura de la lámina sobre el tramo; en la barra de la presentación, además, el tramo se ensancha
+  const verPrevia = (t, sobre = barra) => {
+    tramos.forEach(x => x.classList.toggle('h', sobre === barra && x === t));
+    const q = t ? +t.dataset.q : -1;
+    if (!t || q === D.i) { prev.classList.remove('on'); return; }
+    const l = prev.querySelector('.nar-prev-l'); l.replaceChildren(miniatura(q));
+    prev.querySelector('.nar-prev-t').textContent = `${num(q)} · ${titulo(q)}`;
+    requestAnimationFrame(() => {   // centrada sobre el tramo, ya ensanchado
+      const r = t.getBoundingClientRect(), B = sobre.getBoundingClientRect();
+      prev.style.left = Math.max(8, Math.min(innerWidth - 296, r.left + r.width / 2 - 144)) + 'px';
+      prev.style.top = B.top - 162 - 26 - 14 + 'px';
+      prev.classList.add('on');
+    });
+  };
+  ['mouseover', 'mousemove'].forEach(ev => barra.addEventListener(ev, e => { const t = e.target.closest('i'); if (t && !t.classList.contains('h')) verPrevia(t); }));
+  barra.addEventListener('mouseleave', () => verPrevia(null));
+  const progN = ctl.querySelector('.nar-prog');
+  ['mouseover', 'mousemove'].forEach(ev => progN.addEventListener(ev, e => { const t = e.target.closest('i'); if (t && prev.dataset.q !== t.dataset.q) { prev.dataset.q = t.dataset.q; verPrevia(t, progN); } }));
+  progN.addEventListener('mouseleave', () => { prev.dataset.q = ''; verPrevia(null); });
+  barra.addEventListener('click', e => { const t = e.target.closest('i'); if (!t) return; verPrevia(null); D.show(+t.dataset.q, 0, D.slides[D.i]); });
+
+  // ---- Subtítulos, progreso y tiempo del narrador ----
+  const subtitulo = t => {
+    const S = L[k]?.subs || [];
+    const j = S.findIndex(s => t >= s.t0 - 0.05 && t <= s.t1 + 0.6);
+    if (j !== frase) { frase = j; sub.innerHTML = j < 0 ? '' : `<span>${S[j].w.map(w => `<s>${w.w}</s>`).join(' ')}</span>`; }
+    if (j >= 0) [...sub.querySelectorAll('s')].forEach((x, q) => x.classList.toggle('y', t >= S[j].w[q].t - 0.04));
+  };
+  const ahora = () => L[k] ? audio.currentTime : sonando ? (performance.now() - t0) / 1000 : tPausa;
+  const pintar = () => {
+    const t = Math.min(dur[k], ahora());
+    segs.forEach((s, q) => s.style.setProperty('--p', q < k ? '100%' : q > k ? '0%' : t / dur[k] * 100 + '%'));
+    $('.nar-t').textContent = `${mmss(dur.slice(0, k).reduce((a, b) => a + b, 0) + t)} / ${mmss(total)}`;
+    $('.nar-tit').textContent = `${num(k)} · ${titulo(k)}`;
+  };
+  const bucle = () => {
+    const t = ahora(), cs = CUES[k];
+    if (L[k]) { while (cue < cs.length && t >= cs[cue].t) disparar(cs[cue++]); subtitulo(t); }
+    else { while (cue < cs.length && t >= 1.6 + cue * 1.8) disparar(cs[cue++]); if (t >= dur[k]) { siguiente(); return; } }
+    pintar();
+    raf = sonando ? requestAnimationFrame(bucle) : 0;
+  };
+  const botones = () => {
+    const pp = sonando ? ico.pausa : ico.play;
+    $('.nar-pp').innerHTML = pp; $('.nar-pp').ariaLabel = sonando ? 'Pausa' : 'Reproducir';
+    panel.querySelectorAll('[data-op]').forEach(b => {
+      const id = b.dataset.op, on = id === 'narrador' ? narrador : id === 'tema' ? root.dataset.theme === 'light' : !!P[id];
+      const off = (id === 'ctlNarr' && !narrador) || (id === 'ctlPres' && narrador);
+      b.setAttribute('aria-checked', on); b.setAttribute('aria-disabled', off);
+      b.querySelector('small').textContent = off ? (id === 'ctlNarr' ? 'Sin efecto: el narrador está apagado' : 'Sin efecto mientras el narrador está encendido') : b.dataset.sm;
+    });
+    panel.querySelectorAll('[data-hue]').forEach(b => b.setAttribute('aria-pressed', b.dataset.hue === (GD.hue || HUE0)));
+    $('.nar-vel').textContent = String(VEL[P.vel]).replace('.', ',') + '×';
+    $('.nar-voz').setAttribute('aria-pressed', P.voz); $('.nar-cc').setAttribute('aria-pressed', P.subs);
+    audio.muted = !P.voz || cedida; audio.playbackRate = VEL[P.vel];
+    root.classList.toggle('narrando', narrador);
+    root.classList.toggle('ver-ctl-narr', narrador && P.ctlNarr);
+    root.classList.toggle('ver-ctl-pres', !narrador && P.ctlPres);
+    root.classList.toggle('sin-subs', !P.subs); root.classList.toggle('fijar-rueda', !!P.fijar);
+    pintarBarra();
+  };
+
+  // ---- Reproducción con el narrador ----
+  const cargar = (n, reiniciar = false) => {
+    clearTimeout(timer); cancelAnimationFrame(raf); audio.pause(); soltar(); cue = 0; frase = -1; sub.innerHTML = ''; tPausa = 0;
+    k = Math.max(0, Math.min(D.count - 1, n));
+    if (D.i !== k || reiniciar) {   // reiniciar: vuelve a correr las animaciones de entrada junto con la voz
+      if (D.i === k) { D.slides[k].classList.remove('on'); D.slides[k].offsetWidth; }
+      interno = true; D.show(k, 0, D.i !== k ? D.slides[D.i] : null); interno = false;
+    }
+    prepTL(k);
+    if (narrador && !tienePaso(k)) D.paso(D.stepsOf(D.slides[k]).at(-1) || 0);   // pasos que el guion no nombra: a la vista
+    if (L[k]) { audio.src = L[k].audio; audio.playbackRate = VEL[P.vel]; }
+    pintar(); pintarBarra();
+    if (sonando) timer = setTimeout(arrancar, GAP_IN);
+  };
+  const arrancar = () => {
+    if (!sonando) return;
+    if (document.hidden) { pausa(); return; }   // una copia que no se ve no habla
+    cedida = false; audio.muted = !P.voz; avisar();
+    if (L[k]) audio.play().catch(() => { sonando = false; botones(); });
+    else t0 = performance.now() - tPausa * 1000;
+    cancelAnimationFrame(raf); raf = requestAnimationFrame(bucle);
+  };
+  const siguiente = () => { if (k < D.count - 1) cargar(k + 1); else terminar(); };
+  const terminar = () => { sonando = false; fin = true; cancelAnimationFrame(raf); botones(); quieto(false); };
+  audio.addEventListener('ended', () => { if (sonando) { subtitulo(1e9); timer = setTimeout(siguiente, GAP_OUT); } });
+  const play = () => {
+    if (!narrador) { narradorOn(); return; }
+    sonando = true; botones();
+    if (fin) { fin = false; cargar(0, true); }
+    else if (D.i !== k) cargar(D.i, true);
+    else if (L[k] && audio.ended) siguiente();
+    else if ((L[k] && audio.currentTime > 0) || (!L[k] && tPausa > 0)) { reconstruir(cue); arrancar(); }
+    else cargar(k, true);
+    quieto(true);
+  };
+  const pausa = () => { if (!L[k]) tPausa = ahora(); sonando = false; clearTimeout(timer); audio.pause(); cancelAnimationFrame(raf); botones(); quieto(false); };
+  const alternar = () => sonando ? pausa() : play();
+  document.addEventListener('comentar:modo', e => { if (e.detail && e.detail.activo && sonando) pausa(); }); // al escribir una nota el narrador se pausa
+  const narradorOn = () => { if (!conVoz) return; narrador = true; fin = false; sonando = true; botones(); cargar(D.i, true); quieto(true); };
+  const narradorOff = () => {
+    pausa(); narrador = false; sub.innerHTML = ''; root.classList.remove('quieto');
+    if (P.resaltar) reconstruir(cue); else { cue = 0; completa(); }
+    botones();
+  };
+
+  // ---- Avanzar a mano ----
+  const adelante = () => {
+    if (narrador) { cargar(k + 1); return; }
+    if (usaMarcas(D.i) && cue < CUES[D.i].length) { disparar(CUES[D.i][cue++]); pintarBarra(); return; }
+    D.next(); pintarBarra();
+  };
+  const atras = () => {
+    if (narrador) { cargar(audio.currentTime > 2.5 ? k : k - 1); return; }
+    if (usaMarcas(D.i) && cue > 0) { reconstruir(cue - 1); pintarBarra(); return; }
+    D.prev(); pintarBarra();
+  };
+  // La lámina cambió por fuera de la guía (barra, teclas Inicio/Fin, deslizar, el motor)
+  addEventListener('lamina', e => {
+    if (interno) return;
+    k = e.detail.i; cue = 0; soltar(); sub.innerHTML = ''; tPausa = 0;
+    if (narrador) { cargar(k); return; }
+    prepTL(k);
+    if (e.detail.s === 'end' && usaMarcas(k)) reconstruir(CUES[k].length);
+    pintarBarra();
+  });
+
+  // ---- Panel de opciones ----
+  let porOrilla = false, cierre = 0;
+  const abrir = (orill = false) => { clearTimeout(cierre); porOrilla = orill; verPrevia(null); root.classList.add('panel-on'); botones(); };
+  const cerrar = () => { root.classList.remove('panel-on'); porOrilla = false; };
+  const cambiar = id => {
+    if (id === 'narrador') { narrador ? narradorOff() : narradorOn(); return; }
+    if ((id === 'ctlNarr' && !narrador) || (id === 'ctlPres' && narrador)) return;   // inhabilitadas
+    if (id === 'tema') { root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light'; GD.tema = root.dataset.theme; guardarD(); }
+    else { P[id] = !P[id]; guardar(id); }
+    if (id === 'resaltar' && !narrador) { cue = 0; prepTL(k); if (P.resaltar) reconstruir(0); else completa(); }
+    if (id === 'ctlNarr') quieto(false);
+    botones();
+  };
+  panel.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.op) cambiar(b.dataset.op);
+    else if (b.dataset.hue) { GD.hue = b.dataset.hue === HUE0 ? undefined : b.dataset.hue; root.style.setProperty('--hue', b.dataset.hue); guardarD(); botones(); if (foco) enfocar(foco.sl, foco.arg, foco.modo, false); }
+    else if (b.dataset.accion === 'full') document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen();
+  });
+  rueda.addEventListener('click', () => root.classList.contains('panel-on') ? cerrar() : abrir());
+  orilla.addEventListener('mouseenter', () => abrir(true));
+  panel.addEventListener('mouseleave', () => { if (porOrilla) cierre = setTimeout(cerrar, 450); });
+  panel.addEventListener('mouseenter', () => clearTimeout(cierre));
+
+  // ---- Controles del narrador ----
+  ctl.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const c = b.className;
+    if (c === 'nar-pp') alternar();
+    else if (c === 'nar-sig') adelante();
+    else if (c === 'nar-ant') atras();
+    else if (c === 'nar-vel') { P.vel = (P.vel + 1) % VEL.length; guardar('vel'); botones(); }
+    else if (c === 'nar-voz') { P.voz = !P.voz; guardar('voz'); botones(); }
+    else if (c === 'nar-cc') { P.subs = !P.subs; guardar('subs'); botones(); }
+    else if (c === 'nar-full') document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen();
+    else if (c === 'nar-abre') abrir();
+  });
+  ctl.querySelector('.nar-prog').addEventListener('click', e => { const q = segs.indexOf(e.target.closest('i')); if (q >= 0) cargar(q, true); });
+
+  // ---- Teclado, clic y deslizar ----
+  // El teclado se toma en captura (antes que el motor). Los clics y el deslizar, en fase normal: las
+  // herramientas que anotan sobre la página los reciben primero y, si los usan,
+  // la lámina no cambia.
+  const escribiendo = e => { const t = e.composedPath?.()[0] || e.target; return t.isContentEditable || t.closest?.(['input', 'textarea', 'select', '[contenteditable]'].join(',')); };
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey || escribiendo(e)) return;
+    const tecla = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const go = {
+      ArrowRight: adelante, ArrowDown: adelante, PageDown: adelante, Enter: adelante,
+      ArrowLeft: atras, ArrowUp: atras, PageUp: atras, Backspace: atras,
+      ' ': narrador ? alternar : adelante, k: () => narrador && alternar(),
+      o: () => root.classList.contains('panel-on') ? cerrar() : abrir(), '?': abrir, Escape: cerrar,
+      n: () => conVoz && cambiar('narrador'), m: () => cambiar('ctlNarr'), r: () => hayMarcas && cambiar('resaltar'), b: () => cambiar('ctlPres'), t: () => cambiar('tema'),
+      v: () => narrador && $('.nar-voz').click(),
+    }[tecla];
+    if (!go) return;   // Inicio, Fin y F siguen en el motor
+    e.preventDefault(); e.stopImmediatePropagation(); go(); quieto(true);
+  }, true);
+  const IGNORAR = ['.nar-ui', '.nar-barra', '.nar-prev', 'button', 'a', 'input', 'select', 'textarea', '[data-interactivo]'].join(',');
+  addEventListener('click', e => {
+    if (e.defaultPrevented || e.target.closest?.(IGNORAR)) return;
+    if (root.classList.contains('panel-on')) { cerrar(); return; }
+    if (narrador) alternar(); else (e.clientX > innerWidth / 3 ? adelante : atras)();
+  });
+  let tx = null;
+  addEventListener('touchstart', e => { tx = e.defaultPrevented || e.target.closest?.(IGNORAR) ? null : e.touches[0].clientX; }, { passive: true });
+  addEventListener('touchend', e => {
+    if (tx === null || e.defaultPrevented) return; const dx = e.changedTouches[0].clientX - tx; tx = null;
+    if (Math.abs(dx) > 40) (dx < 0 ? adelante : atras)();
+  });
+  addEventListener('resize', () => { ubicarBarra(); if (foco) enfocar(foco.sl, foco.arg, foco.modo, false); });
+
+  // ---- Con el narrador sonando, controles y rueda se esconden con el mouse quieto ----
+  let idle = 0;
+  const quieto = programar => { root.classList.remove('quieto'); clearTimeout(idle); if (programar && sonando) idle = setTimeout(() => sonando && !root.classList.contains('panel-on') && root.classList.add('quieto'), 2600); };
+  addEventListener('mousemove', e => {
+    quieto(true);
+    root.classList.toggle('ver-rueda', e.clientX > innerWidth - 160 && e.clientY < 160 || e.clientX > innerWidth - 22);
+  }, { passive: true });
+  addEventListener('touchstart', () => quieto(true), { passive: true });
+  ctl.addEventListener('mouseenter', () => clearTimeout(idle));
+
+  // ---- Inicio: presentación a mano, con su barra; el narrador se enciende desde las opciones (N) ----
+  ubicarBarra(); prepTL(k); botones(); pintar();
+  window.__guia = { play, pausa, cargar, adelante, atras, cambiar, enfocar: (a, m) => enfocar(D.slides[k], a, m), get k() { return k; }, get cue() { return cue; }, get narrador() { return narrador; }, audio, P };
+});
+</script>
+
+<script>
+/* ===================== VIDEO EN LÁMINA =====================
+   <video muted playsinline src="…" data-avance-fin>        al terminar, pasa solo a la lámina siguiente
+   <video muted playsinline src="…" data-tramo="12,30,52">  tramos por flecha: cada paso de la lámina reproduce un tramo
+                                                           (segundos donde termina cada uno) y se queda en su último cuadro
+   <video … data-tramo="12,30,52" data-avance-fin>          los tramos corren solos, uno tras otro, y al final pasa a la lámina siguiente
+   data-caps="Leyenda 1|Leyenda 2|…" muestra una leyenda por tramo bajo el video.
+   Con el narrador encendido no hay avance automático (el narrador manda); con ?estatico queda el último cuadro. */
+(() => {
+  const D = window.__deck, root = document.documentElement;
+  if (!D) return;
+  const est = root.classList.contains('estatico'), solo = () => !root.classList.contains('narrando');
+  document.querySelectorAll('video[data-avance-fin], video[data-tramo]').forEach(v => {
+    const sl = v.closest('.slide'); if (!sl) return;
+    const fin = (v.dataset.tramo || '').split(',').map(Number).filter(n => n > 0), auto = 'avanceFin' in v.dataset;
+    const caps = (v.dataset.caps || '').split('|');
+    const cap = v.dataset.caps ? v.insertAdjacentElement('afterend', Object.assign(document.createElement('div'), { className: 'vcap' })) : null;
+    v.muted = true; v.playsInline = true; v.loop = false; v.removeAttribute('loop'); v.removeAttribute('autoplay'); v.pause();
+    let activa = false, seg = -1, tope = 0, tmr = 0;
+    const final = () => fin.length ? fin[fin.length - 1] - .2 : Math.max(0, (v.duration || 1) - .2);
+    const siguiente = (ms, n) => { clearTimeout(tmr); tmr = setTimeout(() => { if (activa && solo() && (n === undefined || seg === n)) D.next(); }, ms); };
+    if (est) {
+      v.addEventListener('loadeddata', () => { v.currentTime = final(); }, { once: true });
+      if (cap) cap.textContent = caps[fin.length ? fin.length - 1 : 0] || '';
+      return;
+    }
+    if (!fin.length) {   // un solo video: corre al entrar y, al terminar, pasa a la lámina siguiente
+      v.addEventListener('ended', () => { if (auto) siguiente(1200); });
+      const entra = (i, s) => {
+        activa = D.slides[i] === sl; clearTimeout(tmr);
+        if (!activa) { v.pause(); return; }
+        if (s === 'end') { v.pause(); v.currentTime = final(); return; }   // se llegó volviendo atrás: no se reproduce ni avanza
+        v.currentTime = 0; v.play().catch(() => {}); if (cap) cap.textContent = caps[0] || '';
+      };
+      addEventListener('lamina', e => entra(e.detail.i, e.detail.s));
+      entra(D.i, 0);   // la lámina inicial ya se mostró antes de que este script corriera
+      return;
+    }
+    const inicio = n => n <= 1 ? 0 : fin[n - 2];
+    const vigilar = () => {
+      if (tope && v.currentTime >= tope - .12) {
+        v.pause(); v.currentTime = tope - .12; tope = 0;
+        if (auto) siguiente(1600, seg);
+      }
+      if (!v.paused) requestAnimationFrame(vigilar);
+    };
+    v.addEventListener('play', () => requestAnimationFrame(vigilar));
+    const ir = (n, reproducir) => {
+      clearTimeout(tmr);
+      if (n <= 0) { v.pause(); tope = 0; v.currentTime = .05; seg = 0; if (cap) cap.textContent = ''; if (auto) siguiente(900, 0); return; }
+      n = Math.min(n, fin.length);
+      if (!reproducir) { v.pause(); tope = 0; v.currentTime = fin[n - 1] - .15; }
+      else { if (n !== seg + 1 || Math.abs(v.currentTime - inicio(n)) > .6) v.currentTime = inicio(n); tope = fin[n - 1]; v.play().catch(() => {}); }
+      if (cap) cap.textContent = caps[n - 1] || '';
+      seg = n;
+    };
+    addEventListener('paso', e => { if (activa && D.slides[e.detail.i] === sl && e.detail.step !== seg) ir(e.detail.step, e.detail.step === seg + 1); });
+    const entra = i => {
+      activa = D.slides[i] === sl;
+      if (!activa) { v.pause(); tope = 0; clearTimeout(tmr); return; }
+      seg = -1; ir(D.step, false);
+    };
+    addEventListener('lamina', e => entra(e.detail.i));
+    entra(D.i);   // la lámina inicial ya se mostró antes de que este script corriera
+  });
+})();
+</script>
+</body>
+</html>
